@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="EInkTheme" parent="android:Theme.Light.NoTitleBar">
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:colorBackground">@android:color/white</item>
+        <item name="android:textColorPrimary">#000000</item>
+        <item name="android:textColorSecondary">#333333</item>
+        <item name="android:listDivider">@drawable/divider</item>
+    </style>
+
+</resources>

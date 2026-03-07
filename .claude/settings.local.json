@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(sqlite3 /c/Source/bible/app/src/main/assets/modules/KJV+.SQLite3 \".tables\")",
+      "Bash(du -sh /c/Source/bible/app/src/main/assets/modules/*)",
+      "Bash(where sqlite3)",
+      "Bash(python3 -c \":*)",
+      "Bash(where python)",
+      "Bash(where py)",
+      "Bash(where java)",
+      "Bash(where node)",
+      "Bash(npm install --no-save better-sqlite3)",
+      "Bash(node -e \":*)",
+      "Bash(where gradle)",
+      "Bash(./gradlew.bat assembleDebug)",
+      "Bash(export JAVA_HOME=\"C:/Program Files/Android/Android Studio/jbr\")",
+      "Bash(adb devices)",
+      "Bash(~/AppData/Local/Android/Sdk/platform-tools/adb.exe devices)",
+      "Bash(~/AppData/Local/Android/Sdk/platform-tools/adb.exe install C:/Source/bible/app/build/outputs/apk/debug/app-debug.apk)",
+      "Bash(# Search for URLs/API endpoints in dex files strings C:/tmp/mybible/apk_contents/classes.dex)",
+      "Bash(done)",
+      "Bash(curl -L -o C:/tmp/mybible/registry.zip \"https://dl.dropbox.com/s/keg0ptkkalux5fi/registry.zip\")",
+      "Bash(node C:/tmp/mybible/parse_registry.js)",
+      "Bash(node C:/tmp/mybible/analyze_registry.js)",
+      "Bash(~/AppData/Local/Android/Sdk/platform-tools/adb.exe install -r C:/Source/bible/app/build/outputs/apk/debug/app-debug.apk)",
+      "Bash(~/AppData/Local/Android/Sdk/platform-tools/adb.exe shell ping -c 2 google.com)",
+      "Bash(gh auth status)",
+      "Bash(where git)",
+      "Bash(git --version)",
+      "Bash(git config --global user.name)",
+      "Bash(git config --global user.email)",
+      "Bash(winget list --name \"GitHub CLI\")",
+      "Bash(where gh)",
+      "Bash(scoop list gh)",
+      "Bash(gh --version)",
+      "Bash(winget install --id GitHub.cli --accept-package-agreements --accept-source-agreements)",
+      "Bash(export PATH=\"$PATH:/c/Program Files/GitHub CLI\")",
+      "Bash(gh auth login --web -p https)"
+    ]
+  }
+}
