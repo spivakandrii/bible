@@ -6,7 +6,7 @@ Built with pure Android SDK (no AndroidX/AppCompat), targeting API 17+ (Android 
 
 ## Features
 
-- **4 bundled translations** — UBIO'88 (Ukrainian), BDC'24 (Ukrainian), KJV+ (English), CUV'23 (Chinese)
+- **4 bundled translations** — UBIO'88 (Біблія Огієнка, українська), CUV'23 (Сучасний переклад, українська), KJV+ (King James + Strong's, English), BDC'24 (Cornilescu, Romanian)
 - **2800+ downloadable Bibles** in 900+ languages via MyBible module repository
 - **Book → Chapter → Verse** navigation
 - **E-ink optimized UI** — no animations, high contrast B&W theme, large fonts, hardware acceleration disabled
