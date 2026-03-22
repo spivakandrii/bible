@@ -184,6 +184,25 @@ public class DatabaseHelper {
         return moduleFileName;
     }
 
+    /**
+     * Check if a book exists in the currently open module.
+     */
+    public boolean hasBook(int bookNumber) {
+        if (db == null) return false;
+        Cursor c = db.rawQuery(
+                "SELECT 1 FROM books WHERE book_number=? LIMIT 1",
+                new String[]{String.valueOf(bookNumber)});
+        try {
+            return c.moveToFirst();
+        } finally {
+            c.close();
+        }
+    }
+
+    public String getCurrentModule() {
+        return currentModule;
+    }
+
     public void close() {
         if (db != null && db.isOpen()) {
             db.close();
