@@ -16,11 +16,17 @@ public class EinkHelper {
     // Reflected classes and methods
     private static Class<?> epdControllerClass;
     private static Class<?> updateModeClass;
+    private static Class<?> updateSchemeClass;
     private static Method setViewDefaultUpdateMode;
     private static Method resetViewUpdateMode;
+    private static Method setSystemUpdateModeAndScheme;
+    private static Method clearSystemUpdateModeAndScheme;
     private static Object updateModeGU;      // partial update, less flash
+    private static Object updateModeGU_FAST; // fast partial
+    private static Object updateModeDU;      // direct update, no flash
     private static Object updateModeGC;      // full quality
     private static Object updateModeAnim;    // animation quality (A2-like)
+    private static Object schemeQueueAndMerge;
 
     static {
         init();
@@ -72,10 +78,11 @@ public class EinkHelper {
             for (Object mode : modes) {
                 String name = mode.toString();
                 if ("GU".equals(name)) updateModeGU = mode;
+                else if ("GU_FAST".equals(name)) updateModeGU_FAST = mode;
+                else if ("DU".equals(name)) updateModeDU = mode;
                 else if ("GC".equals(name)) updateModeGC = mode;
                 else if ("ANIMATION_QUALITY".equals(name)) updateModeAnim = mode;
             }
-            // Fallback: if ANIMATION_QUALITY not found, use GU
             if (updateModeAnim == null) updateModeAnim = updateModeGU;
 
             // Get methods
@@ -83,6 +90,30 @@ public class EinkHelper {
                     "setViewDefaultUpdateMode", View.class, updateModeClass);
             resetViewUpdateMode = epdControllerClass.getMethod(
                     "resetViewUpdateMode", View.class);
+
+            // Try to get system-wide update mode control
+            try {
+                String[] schemeClassNames = {
+                        epdControllerClass.getName() + "$UpdateScheme",
+                        "com.onyx.android.sdk.device.EpdController$UpdateScheme",
+                };
+                for (String sn : schemeClassNames) {
+                    try { updateSchemeClass = Class.forName(sn); break; }
+                    catch (ClassNotFoundException e) {}
+                }
+                if (updateSchemeClass != null) {
+                    for (Object s : updateSchemeClass.getEnumConstants()) {
+                        if ("QUEUE_AND_MERGE".equals(s.toString())) schemeQueueAndMerge = s;
+                    }
+                    setSystemUpdateModeAndScheme = epdControllerClass.getMethod(
+                            "setSystemUpdateModeAndScheme",
+                            updateModeClass, updateSchemeClass, int.class);
+                    clearSystemUpdateModeAndScheme = epdControllerClass.getMethod(
+                            "clearSystemUpdateModeAndScheme");
+                }
+            } catch (Exception e) {
+                // optional, ignore
+            }
 
             available = true;
         } catch (Exception e) {
@@ -131,6 +162,50 @@ public class EinkHelper {
             resetViewUpdateMode.invoke(null, view);
         } catch (Exception e) {
             // ignore
+        }
+    }
+
+    /**
+     * Enable GU (partial update) mode globally for the whole app.
+     * Reduces full-screen flashing on e-ink. Call from Application.onCreate().
+     */
+    public static void enableGlobalPartialUpdate() {
+        if (!available) return;
+        if (setSystemUpdateModeAndScheme != null && schemeQueueAndMerge != null && updateModeGU != null) {
+            try {
+                setSystemUpdateModeAndScheme.invoke(null, updateModeGU, schemeQueueAndMerge, Integer.MAX_VALUE);
+            } catch (Exception e) {}
+        }
+    }
+
+    /**
+     * Set system-wide fast update mode for page turns.
+     * Call before setSelectionFromTop, call clearPageTurnMode after.
+     */
+    public static void setPageTurnMode() {
+        if (!available) return;
+        // Try system-wide mode first (most effective)
+        if (setSystemUpdateModeAndScheme != null && schemeQueueAndMerge != null) {
+            Object mode = updateModeGU_FAST != null ? updateModeGU_FAST :
+                          updateModeDU != null ? updateModeDU : updateModeGU;
+            if (mode != null) {
+                try {
+                    setSystemUpdateModeAndScheme.invoke(null, mode, schemeQueueAndMerge, Integer.MAX_VALUE);
+                    return;
+                } catch (Exception e) {}
+            }
+        }
+    }
+
+    /**
+     * Clear system-wide page turn mode, restore normal rendering.
+     */
+    public static void clearPageTurnMode() {
+        if (!available) return;
+        if (clearSystemUpdateModeAndScheme != null) {
+            try {
+                clearSystemUpdateModeAndScheme.invoke(null);
+            } catch (Exception e) {}
         }
     }
 }

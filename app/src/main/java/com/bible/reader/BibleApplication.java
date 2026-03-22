@@ -10,6 +10,8 @@ public class BibleApplication extends Application {
     public void onCreate() {
         super.onCreate();
         dbHelper = new DatabaseHelper(this);
+        // Enable e-ink partial update mode globally (BOOX devices)
+        EinkHelper.enableGlobalPartialUpdate();
     }
 
     public static DatabaseHelper getDb() {
