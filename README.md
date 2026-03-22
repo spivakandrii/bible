@@ -1,40 +1,51 @@
 # Bible Reader for E-Ink
 
-Lightweight Android Bible reader optimized for e-ink devices.
+Lightweight Android Bible reader optimized for e-ink devices (ONYX BOOX Darwin 3 and similar).
 
-Built with pure Android SDK (no AndroidX/AppCompat), targeting API 17+ (Android 4.2).
+Zero dependencies. Pure Android SDK. Instant launch.
 
 ## Features
 
-- **4 bundled translations** — UBIO'88 (Біблія Огієнка, українська), CUV'23 (Сучасний переклад, українська), KJV+ (King James + Strong's, English), BDC'24 (Cornilescu, Romanian)
+- **Single-screen reader** — opens directly to last read position, no navigation through menus
+- **Inline translation switching** — tap translation name, pick from list, stays on same book/chapter
+- **Book & chapter grid** — tap reference to pick book (6-col grid) then chapter (adaptive grid)
+- **Prev/Next navigation** — arrow buttons for quick chapter browsing (crosses book boundaries)
 - **2800+ downloadable Bibles** in 900+ languages via MyBible module repository
-- **Book → Chapter → Verse** navigation
-- **E-ink optimized UI** — no animations, high contrast B&W theme, large fonts, hardware acceleration disabled
-- **Offline-first** — bundled translations work without internet, downloaded modules cached locally
-- **Ultra-fast** — minimal memory footprint, SQLite direct access, no heavy frameworks
+- **E-ink optimized** — no animations, no dimming, BOOX EpdController partial updates via reflection
+- **State persistence** — remembers module, book, chapter, and scroll position across launches
+- **Ultra-fast** — ~43MB APK, direct SQLite access, no frameworks
 
-## Screenshots
+## Bundled Translations
 
-*Coming soon*
+| Module | Translation | Language |
+|--------|-------------|----------|
+| UBIO'88 | Біблія в пер. Івана Огієнка, 1988 | Українська |
+| CUV'23 | БІБЛІЯ Сучасний переклад (УБТ, 2020-2023) | Українська |
+| KJV+ | King James Version with Strong's numbers | English |
+| BDC'24 | Biblia Dumitru Cornilescu (ediția centenară, 2024) | Română |
 
 ## Architecture
 
 ```
-TranslationActivity          — pick a translation or download new ones
-  ├── BookListActivity       — list of books (Genesis, Exodus, ...)
-  │     └── ChapterListActivity  — grid of chapter numbers
-  │           └── VerseActivity  — full chapter text with verse numbers
-  ├── DownloadLanguagesActivity  — browse languages (sorted by module count)
-  │     └── DownloadModulesActivity  — download a Bible module
-  └── DatabaseHelper         — SQLite access (MyBible format)
-      RegistryManager        — download/cache module catalog
-      ModuleDownloader       — download & extract .zip modules
-      TextCleaner            — strip MyBible HTML markup
+ReaderActivity (LAUNCHER)
+  ├── Verse list          — ListView with superscript verse numbers
+  ├── Translation picker  — inline ListView (replaces verses)
+  ├── Book picker         — inline 6-column GridView
+  ├── Chapter picker      — inline adaptive GridView (5-10 cols)
+  └── Prev/Next buttons   — chapter navigation with book crossover
+
+DownloadLanguagesActivity → DownloadModulesActivity  — browse & download modules
+
+DatabaseHelper     — SQLite access (MyBible format)
+RegistryManager    — download/cache module catalog from 5 mirrors
+ModuleDownloader   — download & extract .zip modules
+TextCleaner        — strip MyBible HTML markup (<S>, <f>, <pb/>)
+EinkHelper         — BOOX EpdController via reflection (graceful fallback)
 ```
 
-## Data format
+## Data Format
 
-Uses [MyBible](https://mybible.zone/) SQLite3 format:
+Uses [MyBible](https://mybible.zone/) SQLite3 modules:
 
 | Table | Columns | Purpose |
 |-------|---------|---------|
@@ -47,17 +58,12 @@ Uses [MyBible](https://mybible.zone/) SQLite3 format:
 Requirements: Android SDK, JDK 17+
 
 ```bash
-# Set JAVA_HOME to Android Studio's bundled JBR (or any JDK 17+)
 export JAVA_HOME="C:/Program Files/Android/Android Studio/jbr"
-
-# Build debug APK
 ./gradlew assembleDebug
-
-# Install via ADB
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-## Tech stack
+## Tech Stack
 
 - **Language**: Java 8
 - **Min SDK**: 17 (Android 4.2)
@@ -66,7 +72,3 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 - **UI**: native `ListView`, `GridView`, `Activity`
 - **DB**: `android.database.sqlite`
 - **Dependencies**: none (zero external libraries)
-
-## License
-
-MIT
