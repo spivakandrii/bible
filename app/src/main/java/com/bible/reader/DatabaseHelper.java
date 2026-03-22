@@ -13,7 +13,6 @@ import java.util.List;
 
 public class DatabaseHelper {
 
-    private static final String DB_NAME = "current.db";
     private static final int BUFFER_SIZE = 8192;
 
     private final Context context;
@@ -35,20 +34,22 @@ public class DatabaseHelper {
         if (downloaded.exists()) {
             db = SQLiteDatabase.openDatabase(downloaded.getPath(), null, SQLiteDatabase.OPEN_READONLY);
         } else {
-            copyFromAssets(moduleFileName);
-            File dbFile = context.getDatabasePath(DB_NAME);
+            // Each asset module gets its own copy (not shared current.db)
+            File dbFile = context.getDatabasePath("asset_" + moduleFileName);
+            if (!dbFile.exists()) {
+                copyFromAssets(moduleFileName, dbFile);
+            }
             db = SQLiteDatabase.openDatabase(dbFile.getPath(), null, SQLiteDatabase.OPEN_READONLY);
         }
         currentModule = moduleFileName;
     }
 
-    private void copyFromAssets(String moduleFileName) {
-        File dbFile = context.getDatabasePath(DB_NAME);
-        dbFile.getParentFile().mkdirs();
+    private void copyFromAssets(String moduleFileName, File targetFile) {
+        targetFile.getParentFile().mkdirs();
 
         try {
             InputStream in = context.getAssets().open("modules/" + moduleFileName);
-            FileOutputStream out = new FileOutputStream(dbFile);
+            FileOutputStream out = new FileOutputStream(targetFile);
             byte[] buf = new byte[BUFFER_SIZE];
             int len;
             while ((len = in.read(buf)) > 0) {
