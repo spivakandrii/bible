@@ -94,4 +94,7 @@ All commands run in Git Bash with `ADB=~/AppData/Local/Android/Sdk/platform-tool
   changes therefore re-bind visible rows in place (`rebindRows`) instead of notifying.
 - Every cross-panel reference goes through `VerseMapper`; translations differ in chapter
   breaks, psalm grouping and numbered psalm titles. Bookmarks store the module they were taken
-  in for the same reason.
+  in for the same reason. Verse splits that counts cannot locate are listed in
+  `VerseMapper.SPLITS`. After touching VerseMapper or adding a bundled module run
+  `tools/versemapper-test/run.sh`: it maps every verse of every module pair there and back on
+  the JVM; only psalm titles and the listed splits may fail to round-trip.

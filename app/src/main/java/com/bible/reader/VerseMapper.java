@@ -24,6 +24,32 @@ final class VerseMapper {
             8, 9, 4, 8, 5, 6, 5, 6, 8, 8, 3, 18, 3, 3, 21, 26, 9, 8, 24, 13,
             10, 7, 12, 15, 21, 10, 20, 14, 9, 6};
 
+    /** The extra verse of a split pairs with the previous verse of the same chapter. */
+    private static final int JOINS_PREVIOUS = 0;
+    /** ... with the last verse of the previous chapter. */
+    private static final int JOINS_PREVIOUS_CHAPTER = -1;
+    /** ... with the first verse of the next chapter. */
+    private static final int JOINS_NEXT_CHAPTER = -2;
+
+    /**
+     * Verse splits that are not chapter-boundary moves, so verse counts cannot locate them:
+     * {book, chapter, verses in the longer version, the extra verse there, what it joins}.
+     * A row applies only when one module has exactly that count and the other one fewer.
+     */
+    private static final int[][] SPLITS = {
+            {40, 25, 19, 19, JOINS_NEXT_CHAPTER},      // Numbers: Hebrew 25:19 is the start of English 26:1
+            {90, 21, 16, 1, JOINS_PREVIOUS_CHAPTER},   // 1 Samuel: Hebrew 21:1 is the end of English 20:42
+            {110, 22, 54, 44, JOINS_PREVIOUS},         // 1 Kings: English 22:43 is Hebrew 22:43-44
+            {130, 12, 41, 5, JOINS_PREVIOUS},          // 1 Chronicles: English 12:4 is Hebrew 12:4-5
+            {160, 7, 73, 69, JOINS_PREVIOUS},          // Nehemiah: horses (7:68) and camels (7:69) are one verse in some texts
+            {290, 64, 12, 1, JOINS_PREVIOUS_CHAPTER},  // Isaiah: English 64:1 is the end of Hebrew 63:19
+            {300, 5, 31, 31, JOINS_PREVIOUS},          // Jeremiah: some texts join 5:30-31
+            {510, 19, 41, 41, JOINS_PREVIOUS},         // Acts: KJV 19:41 is part of 19:40 in modern editions
+            {540, 13, 14, 13, JOINS_PREVIOUS},         // 2 Corinthians: KJV 13:12-13 is one verse in modern editions
+            {710, 1, 15, 15, JOINS_PREVIOUS},          // 3 John: modern 1:14-15 is KJV 1:14
+            {730, 12, 18, 18, JOINS_NEXT_CHAPTER},     // Revelation: modern 12:18 is the start of KJV 13:1
+    };
+
     private VerseMapper() {}
 
     /** {book, chapter, verse} in the numbering of {@code to}, or null if {@code to} lacks the book. */
@@ -42,31 +68,61 @@ final class VerseMapper {
 
     // --- Chapter-boundary differences ---
 
-    private static int[] mapByCounts(int[] ca, int[] cb, int book, int chapter, int verse) {
+    static int[] mapByCounts(int[] ca, int[] cb, int book, int chapter, int verse) {
+        // Known verse splits first: take the extra verse out of the longer side so that the
+        // counts line up, and move the verse number across the split where it matters.
+        int[] a = ca, b = cb;
+        int[] bSplit = null; // {chapter, extra verse} when B is the longer side
+        for (int[] s : SPLITS) {
+            if (s[0] != book) continue;
+            int ch = s[1], longer = s[2], x = s[3], joins = s[4];
+            if (ch >= a.length || ch >= b.length) continue;
+            if (a[ch] == longer && b[ch] == longer - 1) {
+                a = a.clone(); a[ch]--;
+                if (chapter == ch && verse == x) {
+                    if (joins == JOINS_PREVIOUS_CHAPTER) return clampTo(cb, book, chapter - 1, Integer.MAX_VALUE);
+                    if (joins == JOINS_NEXT_CHAPTER) return clampTo(cb, book, chapter + 1, 1);
+                    verse = Math.max(1, x - 1);
+                } else if (chapter == ch && verse > x) {
+                    verse--;
+                }
+            } else if (b[ch] == longer && a[ch] == longer - 1) {
+                b = b.clone(); b[ch]--;
+                bSplit = new int[]{ch, x};
+            }
+        }
+        int[] r = mapAdjusted(a, b, book, chapter, verse);
+        if (bSplit != null && r[1] == bSplit[0] && r[2] >= bSplit[1]) r[2]++;
+        return r;
+    }
+
+    private static int[] mapAdjusted(int[] ca, int[] cb, int book, int chapter, int verse) {
         int na = ca.length - 1, nb = cb.length - 1;
         if (chapter < 1 || chapter > na) return clampTo(cb, book, chapter, verse);
+        if (Arrays.equals(ca, cb)) return clampTo(cb, book, chapter, verse);
         if (na != nb) {
             // Different chapter count (Joel 3 vs 4, Malachi 4 vs 3): if the book has the same
             // number of verses, only boundaries moved, so the verse ordinal is exact.
             if (sum(ca) == sum(cb)) return byOrdinal(ca, cb, book, chapter, verse, 1, na, 1, nb);
             return clampTo(cb, book, chapter, verse);
         }
-        // Same chapter count. Chapters where the cumulative counts agree are anchors; between two
-        // anchors the difference is a moved boundary and the ordinal is exact. A run that never
-        // balances out is a verse split or merge, where keeping the chapter number is closest.
-        int d = 0, start = 1;
-        for (int i = 1; i < chapter; i++) {
-            d += ca[i] - cb[i];
-            if (d == 0) start = i + 1;
+        // Same chapter count. A moved boundary is always two adjacent chapters whose differences
+        // cancel out (Nahum 1 has 15 vs 14 verses, Nahum 2 has 13 vs 14); inside such a pair the
+        // verse ordinal is exact. Pairs are taken greedily from the start. Any other difference is
+        // a verse split or merge missing from SPLITS, where keeping the chapter number is closest.
+        for (int i = 1; i <= na; ) {
+            int d = ca[i] - cb[i];
+            if (d != 0 && i < na && ca[i + 1] - cb[i + 1] == -d) {
+                if (chapter == i || chapter == i + 1) {
+                    return byOrdinal(ca, cb, book, chapter, verse, i, i + 1, i, i + 1);
+                }
+                i += 2;
+            } else {
+                if (chapter == i) return clampTo(cb, book, chapter, verse);
+                i++;
+            }
         }
-        if (d == 0 && ca[chapter] == cb[chapter]) return clampTo(cb, book, chapter, verse);
-        int end = -1;
-        for (int i = chapter; i <= na; i++) {
-            d += ca[i] - cb[i];
-            if (d == 0) { end = i; break; }
-        }
-        if (end == -1) return clampTo(cb, book, chapter, verse);
-        return byOrdinal(ca, cb, book, chapter, verse, start, end, start, end);
+        return clampTo(cb, book, chapter, verse);
     }
 
     /** Maps by verse ordinal inside chapters [sa..ea] of A onto chapters [sb..eb] of B. */
@@ -101,7 +157,7 @@ final class VerseMapper {
         return c[9] >= 30;
     }
 
-    private static int[] mapPsalm(int[] ca, int[] cb, int chapter, int verse) {
+    static int[] mapPsalm(int[] ca, int[] cb, int chapter, int verse) {
         if (chapter < 1 || chapter > 150) return clampTo(cb, PSALMS, chapter, verse);
         boolean lxxA = isSeptuagint(ca), lxxB = isSeptuagint(cb);
         int[] masA = masoreticCounts(ca, lxxA), masB = masoreticCounts(cb, lxxB);
