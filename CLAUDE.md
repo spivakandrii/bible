@@ -32,6 +32,8 @@ Additionally, when the relevant area was touched:
 - ◀ ▶ buttons move between chapters, including across book boundaries.
 - Book grid and chapter grid open full screen; picking navigates to the right place.
 - Translation list opens, switching works, the current one is marked.
+- Long-press a verse: row turns gray, ★ inverts. ★ saves the bookmark (★ marker on the verse);
+  ★ with nothing selected jumps to it in both panels; Back clears the selection.
 - Turn split off, press HOME, restart: single panel; "+" creates the second panel and syncs it.
 - Reading position is restored after a restart.
 
@@ -52,8 +54,15 @@ All commands run in Git Bash with `ADB=~/AppData/Local/Android/Sdk/platform-tool
 - Errors: `adb logcat -c` before the test, then `adb logcat -d -s AndroidRuntime:E`.
 - Keys: `adb shell input keyevent 25` (Volume Down), `24` (Volume Up), `4` (Back), `3` (HOME).
 - Taps: `adb shell input tap X Y` in logical coordinates. Panel 1 toolbar: translation x≈48,
-  reference x≈438, ◀ x≈628, ▶ x≈673, split x≈728. Toolbar y≈30, or y≈100 when the system
-  status bar is visible. Take a screenshot before tapping.
+  reference x≈438, ◀ x≈568, ▶ x≈618, ★ x≈673, split x≈728. Toolbar y≈30, or y≈100 when the
+  system status bar is visible. Take a screenshot before tapping.
+- `adb shell` on Android 4.2 does not return the remote exit code, so a `&&` chain keeps going
+  after a failed device command. Check the output, not the status.
+- Long press: `input swipe` on 4.2 takes no duration and raw `sendevent` touches never reach the
+  app. Use the monkey server instead: `adb shell monkey --port 1080 &`, then
+  `adb forward tcp:1080 tcp:1080`, then over TCP (bash: `exec 3<>/dev/tcp/127.0.0.1/1080`) send
+  `touch down X Y`, wait ~1 s, `touch up X Y`. It also takes `tap X Y`, `press KEYCODE_BACK` and
+  `quit`. Each command replies `OK`.
 - `am force-stop` skips `onPause`, so state is not saved. Press HOME (`keyevent 3`) first.
 - Single taps are occasionally dropped on e-ink: if the screen did not change, tap again.
 
@@ -73,3 +82,6 @@ All commands run in Git Bash with `ADB=~/AppData/Local/Android/Sdk/platform-tool
 - E-ink modes go through `EinkHelper` only (reflection, silently no-op on non-BOOX devices).
 - `GridView` cells get their height via `LayoutParams`, not `TextView.setHeight()`.
 - `setSelectionFromTop` takes an offset relative to the list padding, not to the list edge.
+- Never call `notifyDataSetChanged` or `setSelectionFromTop` from inside `OnScrollListener`:
+  it runs during `layoutChildren` with layout requests blocked, the list stays flagged dirty and
+  ignores touches until an unrelated layout. Post the work with `verseList.post()`.
