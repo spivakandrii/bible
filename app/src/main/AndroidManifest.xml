@@ -5,6 +5,7 @@
 
     <application
         android:name=".BibleApplication"
+        android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:theme="@style/EInkTheme"
         android:hardwareAccelerated="false">
