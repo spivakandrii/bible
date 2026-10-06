@@ -117,7 +117,7 @@ public class ReaderPanel {
                 }
                 if (!loading && firstVisible <= 5 && firstLoadedBook != -1) {
                     View fc = view.getChildAt(0);
-                    int offset = (fc != null) ? fc.getTop() : 0;
+                    int offset = (fc != null) ? fc.getTop() - view.getPaddingTop() : 0;
                     int added = prependPreviousChapter();
                     if (added > 0) verseList.setSelectionFromTop(firstVisible + added, offset);
                 }
@@ -379,15 +379,40 @@ public class ReaderPanel {
         if (syncListener != null) syncListener.onPickerClosed(this);
     }
 
+    /**
+     * Cell height so that {@code rows} rows fill the picker exactly. Pickers take the whole
+     * screen (the activity hides the other panel), so measure the panels' container rather
+     * than this panel, which is only half-height in split mode.
+     */
+    private int pickerCellHeight(GridView grid, int rows) {
+        float density = activity.getResources().getDisplayMetrics().density;
+        View container = (View) root.getParent();
+        int totalH = (container != null && container.getHeight() > 0)
+                ? container.getHeight() : activity.getResources().getDisplayMetrics().heightPixels;
+        int toolbarH = root.findViewById(R.id.panel_toolbar).getHeight();
+        if (toolbarH <= 0) toolbarH = (int) (40 * density);
+        int availH = totalH - toolbarH - grid.getPaddingTop() - grid.getPaddingBottom()
+                - (rows - 1) * grid.getVerticalSpacing();
+        return Math.max((int) (36 * density), availH / Math.max(1, rows));
+    }
+
+    /** Chapter numbers grow with the cell (16sp at 36dp up to 32sp) so short books are not dotted with tiny digits. */
+    private float chapterTextSize(int cellHeightPx) {
+        float cellDp = cellHeightPx / activity.getResources().getDisplayMetrics().density;
+        return Math.max(16f, Math.min(32f, cellDp / 3.5f));
+    }
+
+    /** GridView sizes cells from their LayoutParams, so TextView.setHeight() alone has no effect. */
+    private static void setCellHeight(View cell, int height) {
+        ViewGroup.LayoutParams lp = cell.getLayoutParams();
+        if (lp != null && lp.height != height) { lp.height = height; cell.setLayoutParams(lp); }
+    }
+
     private void showBookPicker() {
         if (bookPickerVisible) { hideAllPickers(); return; }
         final List<int[]> books = db.getBooks();
         int bRows = (books.size() + 5) / 6;
-        int bAvailH = activity.getResources().getDisplayMetrics().heightPixels
-                - (int)(54 * activity.getResources().getDisplayMetrics().density);
-        // In split mode, panel is half screen
-        if (root.getHeight() > 0) bAvailH = root.getHeight() - (int)(40 * activity.getResources().getDisplayMetrics().density);
-        final int bCellH = bAvailH / bRows;
+        final int bCellH = pickerCellHeight(bookGrid, bRows);
 
         bookGrid.setAdapter(new BaseAdapter() {
             @Override public int getCount() { return books.size(); }
@@ -398,7 +423,7 @@ public class ReaderPanel {
                 int bn = books.get(p)[0];
                 String sn = db.getBookShortName(bn); if (sn.isEmpty()) sn = db.getBookName(bn);
                 TextView tv = (TextView) cv.findViewById(R.id.cell_text);
-                tv.setText(sn); tv.setHeight(bCellH); tv.setTextSize(16);
+                tv.setText(sn); setCellHeight(cv, bCellH);
                 tv.setBackgroundColor(bn == currentBook ? 0xFFCCCCCC : 0xFFF0F0F0);
                 return cv;
             }
@@ -417,9 +442,8 @@ public class ReaderPanel {
         int cols = chapterCount <= 20 ? 5 : chapterCount <= 50 ? 6 : chapterCount <= 80 ? 8 : 10;
         chapterGrid.setNumColumns(cols);
         int rows = (chapterCount + cols - 1) / cols;
-        int availH = root.getHeight() > 0 ? root.getHeight() - (int)(40 * activity.getResources().getDisplayMetrics().density)
-                : activity.getResources().getDisplayMetrics().heightPixels - (int)(54 * activity.getResources().getDisplayMetrics().density);
-        final int cellH = availH / rows;
+        final int cellH = pickerCellHeight(chapterGrid, rows);
+        final float textSp = chapterTextSize(cellH);
 
         chapterGrid.setAdapter(new BaseAdapter() {
             @Override public int getCount() { return chapterCount; }
@@ -429,7 +453,7 @@ public class ReaderPanel {
                 if (cv == null) cv = activity.getLayoutInflater().inflate(R.layout.item_grid_cell, par, false);
                 int ch = p + 1;
                 TextView tv = (TextView) cv.findViewById(R.id.cell_text);
-                tv.setText(String.valueOf(ch)); tv.setHeight(cellH);
+                tv.setText(String.valueOf(ch)); setCellHeight(cv, cellH); tv.setTextSize(textSp);
                 tv.setBackgroundColor(bookNumber == currentBook && ch == currentChapter ? 0xFFCCCCCC : 0xFFF0F0F0);
                 return cv;
             }
