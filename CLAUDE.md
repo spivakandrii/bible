@@ -2,6 +2,7 @@
 
 Android Bible reader for e-ink devices (ONYX BOOX Darwin 3). Pure Java, no AppCompat/AndroidX,
 minSdk 17 (Android 4.2). Priorities: speed on old hardware and as few screen refreshes as possible.
+Feature list, architecture and the numbering problem are described in README.md.
 
 ## Feature cycle
 
@@ -10,6 +11,7 @@ minSdk 17 (Android 4.2). Priorities: speed on old hardware and as few screen ref
    ```bash
    JAVA_HOME="C:/Program Files/Android/Android Studio/jbr" ./gradlew.bat assembleDebug
    ```
+   If `VerseMapper` changed, also run `tools/versemapper-test/run.sh` before deploying.
 3. **Deploy over USB.**
    ```bash
    ~/AppData/Local/Android/Sdk/platform-tools/adb.exe install -r app/build/outputs/apk/debug/app-debug.apk
@@ -68,6 +70,8 @@ All commands run in Git Bash with `ADB=~/AppData/Local/Android/Sdk/platform-tool
   `quit`. Each command replies `OK`.
 - `am force-stop` skips `onPause`, so state is not saved. Press HOME (`keyevent 3`) first.
 - Single taps are occasionally dropped on e-ink: if the screen did not change, tap again.
+- If `adb devices` shows the reader as `offline`, `adb kill-server && adb start-server` usually
+  brings it back; a command waiting on an offline device blocks until then.
 
 ## Build and APK size
 
