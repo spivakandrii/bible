@@ -43,6 +43,9 @@ public class ReaderPanel {
     /** Church Slavonic needs its own font: the system fonts lack the titlo, breathing marks and old letters. */
     private static final String CHURCH_SLAVONIC_FONT = "fonts/PonomarUnicode.ttf";
     private static Typeface churchSlavonic;
+    /** Text sizes in sp: the layout defaults, and the larger ones Ponomar needs to look the same. */
+    private static final float VERSE_SP = 18f, HEADER_SP = 20f, GRID_SP = 16f;
+    private static final float CS_VERSE_SP = 22f, CS_HEADER_SP = 24f, CS_GRID_SP = 18f;
 
     private final Activity activity;
     final View root;
@@ -281,6 +284,7 @@ public class ReaderPanel {
     private void moduleOpened() {
         moduleTypeface = "cu".equals(db.getInfo("language")) ? churchSlavonicTypeface() : null;
         btnReference.setTypeface(moduleTypeface, Typeface.NORMAL);
+        btnReference.setTextSize(moduleTypeface != null ? 16f : 14f);
     }
 
     private Typeface churchSlavonicTypeface() {
@@ -714,7 +718,9 @@ public class ReaderPanel {
                 int bn = books.get(p)[0];
                 String sn = db.getBookShortName(bn); if (sn.isEmpty()) sn = db.getBookName(bn);
                 TextView tv = (TextView) cv.findViewById(R.id.cell_text);
-                tv.setText(sn); setCellHeight(cv, bCellH); tv.setTypeface(moduleTypeface, Typeface.NORMAL);
+                tv.setText(sn); setCellHeight(cv, bCellH);
+                tv.setTypeface(moduleTypeface, Typeface.NORMAL);
+                tv.setTextSize(moduleTypeface != null ? CS_GRID_SP : GRID_SP);
                 tv.setBackgroundColor(bn == currentBook ? 0xFFCCCCCC : 0xFFF0F0F0);
                 return cv;
             }
@@ -787,6 +793,7 @@ public class ReaderPanel {
                 TextView header = (TextView) cv.findViewById(R.id.header_text);
                 header.setText(item.text1);
                 header.setTypeface(moduleTypeface, Typeface.BOLD);
+                header.setTextSize(moduleTypeface != null ? CS_HEADER_SP : HEADER_SP);
                 return cv;
             }
             if (cv == null) cv = activity.getLayoutInflater().inflate(R.layout.item_verse, parent, false);
@@ -795,8 +802,10 @@ public class ReaderPanel {
             TextView tv = (TextView) cv.findViewById(R.id.verse_text);
             tv.setText(item.rendered);
             tv.setTypeface(moduleTypeface, Typeface.NORMAL);
-            // Stacked Church Slavonic marks need more room between lines
-            tv.setLineSpacing(0, moduleTypeface != null ? 1.3f : 1.1f);
+            // Ponomar glyphs are small for their size and its line metrics already leave room for
+            // the stacked marks, so it gets a bigger size and no extra line spacing
+            tv.setTextSize(moduleTypeface != null ? CS_VERSE_SP : VERSE_SP);
+            tv.setLineSpacing(0, moduleTypeface != null ? 1.0f : 1.1f);
             if (selectedKey != -1 && item.key() == selectedKey) cv.setBackgroundColor(0xFFDDDDDD);
             else cv.setBackground(null);
             return cv;
