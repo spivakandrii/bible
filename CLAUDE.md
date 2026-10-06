@@ -32,6 +32,8 @@ Minimum for any change:
   second panel follows after navigation, after a touch scroll stops, and after a translation
   switch. With different translations check a numbering hotspot: CUV Nahum 2:1 must sit next
   to KJV Nahum 1:15, CUV Psalm 10:1 next to UBIO Psalm 9:22.
+- CSLU renders with titla and breathing marks (no boxes), in verses, chapter headers, the
+  toolbar reference and the book grid.
 
 Additionally, when the relevant area was touched:
 - ◀ ▶ buttons move between chapters, including across book boundaries.
@@ -77,7 +79,11 @@ All commands run in Git Bash with `ADB=~/AppData/Local/Android/Sdk/platform-tool
 
 - After removing assets or resources, Gradle's incremental packaging leaves dead space in the APK
   and the size does not drop. Only `./gradlew.bat clean assembleDebug` shows the real size.
-- Debug APK is ≈33 MB, all of it the four bundled translations in `assets/modules/`.
+- Debug APK is ≈43 MB, all of it the five bundled translations in `assets/modules/` (CSLU alone
+  is 9.6 MB uncompressed; `noCompress 'SQLite3'` keeps modules stored, not deflated).
+- Church Slavonic (`language = cu` in the module's info table) uses `assets/fonts/PonomarUnicode.ttf`
+  (OFL 1.1, license file next to it). Any other script that the system fonts lack would need the
+  same treatment: a font in assets and a `moduleOpened()` rule in ReaderPanel.
 - Do not add MyBible `.SQLite3.search` files (full-text index): the app has no search.
 
 ## Code rules

@@ -2,7 +2,8 @@
 # Runs VerseMapper on the JVM against the real verse counts of the bundled modules.
 # Usage: tools/versemapper-test/run.sh   (from the repo root; needs sqlite3 and a JDK)
 set -e
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# Windows binaries (sqlite3.exe, javac) need a C:/... path, which Git Bash gives with pwd -W
+ROOT="$(cd "$(dirname "$0")/../.." && (pwd -W 2>/dev/null || pwd))"
 SQLITE3="${SQLITE3:-$HOME/AppData/Local/Android/Sdk/platform-tools/sqlite3.exe}"
 JAVA_BIN="${JAVA_BIN:-C:/Program Files/Android/Android Studio/jbr/bin}"
 OUT="$ROOT/build/versemapper-test"

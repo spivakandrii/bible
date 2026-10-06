@@ -17,7 +17,8 @@ Zero dependencies. Pure Android SDK. Instant launch.
 - **Infinite scroll** — lazy loading forward and backward, from Genesis to Revelation
 - **2800+ downloadable Bibles** in 900+ languages via MyBible module repository
 - **State persistence** — remembers modules, chapter, scroll position, split mode and bookmark across launches
-- **Ultra-fast** — ~33 MB APK (all of it the bundled Bibles), direct SQLite access, no frameworks
+- **Church Slavonic** — the Elizabeth Bible (CSLU) is bundled and shown in the Ponomar Unicode font, with the full Septuagint canon
+- **Ultra-fast** — ~43 MB APK (all of it the bundled Bibles), direct SQLite access, no frameworks
 
 ## E-Ink Optimization (BOOX)
 
@@ -40,6 +41,9 @@ Falls back gracefully on non-BOOX devices (reflection failures are silently igno
 | CUV'23 | БІБЛІЯ Сучасний переклад (УБТ, 2020-2023) | Українська | Hebrew |
 | KJV+ | King James Version with Strong's numbers | English | English |
 | BDC'24 | Biblia Dumitru Cornilescu (ediția centenară, 2024) | Română | English |
+| CSLU | Библия Церковнославянская (Елизаветинская), 77 books incl. deuterocanon | Церковнослов'янська | Septuagint psalms, numbered titles |
+
+Church Slavonic is rendered with the bundled [Ponomar Unicode](https://www.ponomar.net/) font (SIL Open Font License 1.1), applied automatically to any module whose language is `cu`, including downloaded ones. The system fonts lack the titlo, breathing marks and old letters.
 
 ## One verse, several numbers
 

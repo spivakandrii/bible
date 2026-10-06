@@ -24,6 +24,7 @@ public class VerseMapperTest {
         DatabaseHelper kjv = new DatabaseHelper("KJV", dir + "/counts_KJV.txt");
         DatabaseHelper ubio = new DatabaseHelper("UBIO", dir + "/counts_UBIO88.txt");
         DatabaseHelper bdc = new DatabaseHelper("BDC", dir + "/counts_BDC24.txt");
+        DatabaseHelper cslu = new DatabaseHelper("CSLU", dir + "/counts_CSLU.txt");
 
         System.out.println("== chapter boundaries ==");
         expect(cuv, kjv, 410, 2, 1, 1, 15);     // Nahum
@@ -98,13 +99,25 @@ public class VerseMapperTest {
         expect(kjv, cuv, 730, 13, 1, 13, 1);
         expect(cuv, kjv, 730, 22, 21, 22, 21);
 
+        System.out.println("== Church Slavonic (Septuagint psalms, mixed chapter breaks) ==");
+        expect(cslu, kjv, 230, 9, 22, 10, 1);
+        expect(cslu, cuv, 230, 10, 1, 11, 1);
+        expect(cuv, cslu, 230, 11, 1, 10, 1);
+        expect(cslu, bdc, 230, 23, 1, 24, 1);   // Psalm 23 LXX is Masoretic 24
+        expect(cslu, cuv, 410, 2, 1, 2, 2);     // CSLU Nahum follows the English break
+        expect(cslu, kjv, 410, 2, 1, 2, 1);
+        expect(cslu, cuv, 390, 2, 1, 2, 1);     // but Jonah follows the Hebrew one
+        expect(cslu, kjv, 390, 2, 1, 1, 17);
+        expect(cslu, kjv, 360, 3, 1, 3, 1);     // Joel: 3 chapters like English
+        expect(cslu, cuv, 360, 3, 1, 4, 1);
+
         System.out.println("== identity ==");
         expect(cuv, cuv, 410, 2, 5, 2, 5);
         expect(kjv, bdc, 230, 23, 1, 23, 1);
         expect(cuv, kjv, 470, 5, 3, 5, 3);
 
         System.out.println("== round trips over the whole Bible ==");
-        DatabaseHelper[] mods = {cuv, kjv, ubio, bdc};
+        DatabaseHelper[] mods = {cuv, kjv, ubio, bdc, cslu};
         for (DatabaseHelper a : mods) for (DatabaseHelper b : mods) {
             if (a == b) continue;
             int total = 0, bad = 0;

@@ -2,6 +2,7 @@ package com.bible.reader;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.text.SpannableStringBuilder;
 import android.text.style.RelativeSizeSpan;
@@ -36,7 +37,12 @@ public class ReaderPanel {
             {"BDC'24.SQLite3", "BDC'24"},
             {"KJV+.SQLite3", "KJV+"},
             {"CUV'23.SQLite3", "CUV'23"},
+            {"CSLU.SQLite3", "CSLU"},
     };
+
+    /** Church Slavonic needs its own font: the system fonts lack the titlo, breathing marks and old letters. */
+    private static final String CHURCH_SLAVONIC_FONT = "fonts/PonomarUnicode.ttf";
+    private static Typeface churchSlavonic;
 
     private final Activity activity;
     final View root;
@@ -60,6 +66,8 @@ public class ReaderPanel {
     private boolean loading = false;
 
     private OnScrollSyncListener syncListener;
+    /** Font for verses, headers and book names of the open module; null means the system default. */
+    private Typeface moduleTypeface;
 
     /** Packed verse keys (see verseKey); -1 = none. Selection is per panel, the bookmark is shared. */
     private int selectedKey = -1;
@@ -265,7 +273,25 @@ public class ReaderPanel {
         currentBook = book;
         currentChapter = chapter;
         db.openModule(currentModule);
+        moduleOpened();
         loadFrom(currentBook, currentChapter);
+    }
+
+    /** Picks the font for the module just opened and applies it to the toolbar reference. */
+    private void moduleOpened() {
+        moduleTypeface = "cu".equals(db.getInfo("language")) ? churchSlavonicTypeface() : null;
+        btnReference.setTypeface(moduleTypeface, Typeface.NORMAL);
+    }
+
+    private Typeface churchSlavonicTypeface() {
+        if (churchSlavonic == null) {
+            try {
+                churchSlavonic = Typeface.createFromAsset(activity.getAssets(), CHURCH_SLAVONIC_FONT);
+            } catch (RuntimeException e) {
+                churchSlavonic = Typeface.DEFAULT;
+            }
+        }
+        return churchSlavonic;
     }
 
     // --- List position ---
@@ -622,6 +648,7 @@ public class ReaderPanel {
         if (moduleFile.equals(currentModule)) return;
         currentModule = moduleFile;
         db.openModule(currentModule);
+        moduleOpened();
         if (!db.hasBook(currentBook)) {
             List<int[]> books = db.getBooks();
             if (!books.isEmpty()) currentBook = books.get(0)[0];
@@ -687,7 +714,7 @@ public class ReaderPanel {
                 int bn = books.get(p)[0];
                 String sn = db.getBookShortName(bn); if (sn.isEmpty()) sn = db.getBookName(bn);
                 TextView tv = (TextView) cv.findViewById(R.id.cell_text);
-                tv.setText(sn); setCellHeight(cv, bCellH);
+                tv.setText(sn); setCellHeight(cv, bCellH); tv.setTypeface(moduleTypeface, Typeface.NORMAL);
                 tv.setBackgroundColor(bn == currentBook ? 0xFFCCCCCC : 0xFFF0F0F0);
                 return cv;
             }
@@ -757,13 +784,19 @@ public class ReaderPanel {
             ReadingItem item = items.get(position);
             if (item.type == TYPE_HEADER) {
                 if (cv == null) cv = activity.getLayoutInflater().inflate(R.layout.item_chapter_header, parent, false);
-                ((TextView) cv.findViewById(R.id.header_text)).setText(item.text1);
+                TextView header = (TextView) cv.findViewById(R.id.header_text);
+                header.setText(item.text1);
+                header.setTypeface(moduleTypeface, Typeface.BOLD);
                 return cv;
             }
             if (cv == null) cv = activity.getLayoutInflater().inflate(R.layout.item_verse, parent, false);
             // Regex cleanup + Html.fromHtml are expensive; do them once per verse, not on every bind.
             if (item.rendered == null) item.rendered = renderVerse(item);
-            ((TextView) cv.findViewById(R.id.verse_text)).setText(item.rendered);
+            TextView tv = (TextView) cv.findViewById(R.id.verse_text);
+            tv.setText(item.rendered);
+            tv.setTypeface(moduleTypeface, Typeface.NORMAL);
+            // Stacked Church Slavonic marks need more room between lines
+            tv.setLineSpacing(0, moduleTypeface != null ? 1.3f : 1.1f);
             if (selectedKey != -1 && item.key() == selectedKey) cv.setBackgroundColor(0xFFDDDDDD);
             else cv.setBackground(null);
             return cv;
