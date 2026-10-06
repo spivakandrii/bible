@@ -26,7 +26,10 @@ minSdk 17 (Android 4.2). Priorities: speed on old hardware and as few screen ref
 Minimum for any change:
 - App starts, `am start -W` reports TotalTime (~500 ms is normal), no `AndroidRuntime:E` in logcat.
 - Volume Down / Volume Up turn pages.
-- In split mode the second panel follows after a page turn and after navigation.
+- In split mode both panels start the new page at the same verse after a page turn, and the
+  second panel follows after navigation, after a touch scroll stops, and after a translation
+  switch. With different translations check a numbering hotspot: CUV Nahum 2:1 must sit next
+  to KJV Nahum 1:15, CUV Psalm 10:1 next to UBIO Psalm 9:22.
 
 Additionally, when the relevant area was touched:
 - ◀ ▶ buttons move between chapters, including across book boundaries.
@@ -85,3 +88,10 @@ All commands run in Git Bash with `ADB=~/AppData/Local/Android/Sdk/platform-tool
 - Never call `notifyDataSetChanged` or `setSelectionFromTop` from inside `OnScrollListener`:
   it runs during `layoutChildren` with layout requests blocked, the list stays flagged dirty and
   ignores touches until an unrelated layout. Post the work with `verseList.post()`.
+- Move the verse list only through `ReaderPanel.moveTo()`: it records the pending position until
+  the next layout. `getFirstVisiblePosition()` is stale in between, and a `notifyDataSetChanged`
+  in that window makes the ListView snap back to the stale position. Marker and selection
+  changes therefore re-bind visible rows in place (`rebindRows`) instead of notifying.
+- Every cross-panel reference goes through `VerseMapper`; translations differ in chapter
+  breaks, psalm grouping and numbered psalm titles. Bookmarks store the module they were taken
+  in for the same reason.
