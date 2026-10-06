@@ -311,6 +311,18 @@ public class ReaderPanel {
         verseList.setSelectionFromTop(position, offset);
     }
 
+    /**
+     * Pushes changed items into the list and puts position at the top. notifyDataSetChanged is
+     * not used for this: on Android 4.2 the ListView then restores its previous first position
+     * and, in touch mode, setSelectionFromTop cannot override that, so the panel landed on
+     * whatever the old index pointed to in the new list. Re-setting the adapter clears that
+     * sync; the cost is re-inflating the dozen visible rows.
+     */
+    private void reloadListAt(int position, int offset) {
+        verseList.setAdapter(adapter);
+        moveTo(position, offset);
+    }
+
     /** The position that is, or is about to be, at the top of the list. */
     private int topPosition() {
         return pendingTop != null ? pendingTop[0] : verseList.getFirstVisiblePosition();
@@ -339,8 +351,7 @@ public class ReaderPanel {
         firstLoadedBook = bookNumber; firstLoadedChapter = chapter;
         appendChapter(bookNumber, chapter);
         appendFollowingChapters(INITIAL_LOOKAHEAD);
-        adapter.notifyDataSetChanged();
-        moveTo(0, 0);
+        reloadListAt(0, 0);
         currentBook = bookNumber; currentChapter = chapter;
         updateToolbar();
     }
@@ -373,9 +384,10 @@ public class ReaderPanel {
     private final Runnable appendRunnable = new Runnable() {
         @Override public void run() {
             if (appendFollowingChapters(SCROLL_LOOKAHEAD) > 0) {
-                adapter.notifyDataSetChanged();
-                // notify makes the list re-sync to its stale first position; re-assert a pending move
-                if (pendingTop != null) verseList.setSelectionFromTop(pendingTop[0], pendingTop[1]);
+                // Appending keeps every existing position, so the list's own "restore the first
+                // position" after notify is exactly right, unless a move is still pending.
+                if (pendingTop != null) reloadListAt(pendingTop[0], pendingTop[1]);
+                else adapter.notifyDataSetChanged();
             }
             loading = false;
         }
@@ -386,7 +398,7 @@ public class ReaderPanel {
         @Override public void run() {
             int first = topPosition(), offset = topOffset();
             int added = prependPreviousChapter();
-            if (added > 0) moveTo(first + added, offset);
+            if (added > 0) reloadListAt(first + added, offset);
             loading = false;
         }
     };
@@ -406,8 +418,7 @@ public class ReaderPanel {
         for (String[] v : verses) newItems.add(new ReadingItem(TYPE_VERSE, prevBook, prevChapter, v[0], v[1]));
         items.addAll(0, newItems);
         firstLoadedBook = prevBook; firstLoadedChapter = prevChapter;
-        adapter.notifyDataSetChanged();
-        return newItems.size();
+        return newItems.size(); // the caller reloads the list at the shifted position
     }
 
     // --- Page turn ---

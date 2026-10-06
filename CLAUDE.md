@@ -99,9 +99,13 @@ All commands run in Git Bash with `ADB=~/AppData/Local/Android/Sdk/platform-tool
   it runs during `layoutChildren` with layout requests blocked, the list stays flagged dirty and
   ignores touches until an unrelated layout. Post the work with `verseList.post()`.
 - Move the verse list only through `ReaderPanel.moveTo()`: it records the pending position until
-  the next layout. `getFirstVisiblePosition()` is stale in between, and a `notifyDataSetChanged`
-  in that window makes the ListView snap back to the stale position. Marker and selection
-  changes therefore re-bind visible rows in place (`rebindRows`) instead of notifying.
+  the next layout, because `getFirstVisiblePosition()` is stale in between.
+- Never pair `notifyDataSetChanged` with `setSelectionFromTop` when the items were replaced or
+  prepended: on Android 4.2 the ListView restores its previous first position after a notify,
+  and in touch mode `setSelectionFromTop` cannot override that, so the panel lands on whatever
+  the old index means in the new list. Use `reloadListAt()` (re-sets the adapter) for those
+  cases; plain notify is right only for appends, where every position stays valid. Marker and
+  selection changes re-bind visible rows in place (`rebindRows`) instead of notifying.
 - Every cross-panel reference goes through `VerseMapper`; translations differ in chapter
   breaks, psalm grouping and numbered psalm titles. Bookmarks store the module they were taken
   in for the same reason. Verse splits that counts cannot locate are listed in
