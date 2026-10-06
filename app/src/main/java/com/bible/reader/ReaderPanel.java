@@ -2,11 +2,9 @@ package com.bible.reader;
 
 import android.app.Activity;
 import android.content.Intent;
-import android.text.Spanned;
 import android.text.SpannableStringBuilder;
 import android.text.style.RelativeSizeSpan;
 import android.text.style.SuperscriptSpan;
-import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.AbsListView;
@@ -27,6 +25,10 @@ public class ReaderPanel {
 
     private static final int TYPE_HEADER = 0;
     private static final int TYPE_VERSE = 1;
+
+    /** Chapters loaded ahead on a fresh load, and per lazy-load step while scrolling. */
+    private static final int INITIAL_LOOKAHEAD = 5;
+    private static final int SCROLL_LOOKAHEAD = 3;
 
     private static final String[][] BUILTIN_MODULES = {
             {"UBIO'88.SQLite3", "UBIO'88"},
@@ -56,11 +58,12 @@ public class ReaderPanel {
     private boolean loading = false;
 
     private OnScrollSyncListener syncListener;
-    private boolean syncEnabled = true;
 
     static class ReadingItem {
         int type, bookNumber, chapter;
         String text1, text2;
+        /** Verse number + parsed text, built on first display and reused by recycled views. */
+        CharSequence rendered;
         ReadingItem(int type, int bookNumber, int chapter, String text1, String text2) {
             this.type = type; this.bookNumber = bookNumber; this.chapter = chapter;
             this.text1 = text1; this.text2 = text2;
@@ -68,7 +71,6 @@ public class ReaderPanel {
     }
 
     public interface OnScrollSyncListener {
-        void onVerseChanged(ReaderPanel source, int bookNumber, int chapter, String verseNum);
         void onSplitToggle();
         void onPickerOpened(ReaderPanel source);
         void onPickerClosed(ReaderPanel source);
@@ -109,13 +111,9 @@ public class ReaderPanel {
                         currentChapter = item.chapter;
                         updateToolbar();
                     }
-                    // Sync: notify listener about current verse
-                    if (syncEnabled && syncListener != null && item.type == TYPE_VERSE) {
-                        syncListener.onVerseChanged(ReaderPanel.this, item.bookNumber, item.chapter, item.text1);
-                    }
                 }
                 if (!loading && totalCount > 0 && firstVisible + visibleCount >= totalCount - 10) {
-                    for (int i = 0; i < 3; i++) appendNextChapter();
+                    appendNextChapters(SCROLL_LOOKAHEAD);
                 }
                 if (!loading && firstVisible <= 5 && firstLoadedBook != -1) {
                     View fc = view.getChildAt(0);
@@ -164,7 +162,7 @@ public class ReaderPanel {
         lastLoadedBook = -1; lastLoadedChapter = -1;
         firstLoadedBook = bookNumber; firstLoadedChapter = chapter;
         appendChapter(bookNumber, chapter);
-        for (int i = 0; i < 5; i++) appendNextChapter();
+        appendFollowingChapters(INITIAL_LOOKAHEAD);
         adapter.notifyDataSetChanged();
         currentBook = bookNumber; currentChapter = chapter;
         updateToolbar();
@@ -178,23 +176,26 @@ public class ReaderPanel {
         lastLoadedBook = bookNumber; lastLoadedChapter = chapter;
     }
 
-    private void appendNextChapter() {
-        if (lastLoadedBook == -1) return;
-        loading = true;
-        int nextBook = lastLoadedBook, nextChapter = lastLoadedChapter + 1;
-        int maxChapter = db.getChapterCount(lastLoadedBook);
-        if (nextChapter > maxChapter) {
-            List<int[]> books = db.getBooks();
-            boolean found = false; nextBook = -1;
-            for (int[] b : books) {
-                if (found) { nextBook = b[0]; break; }
-                if (b[0] == lastLoadedBook) found = true;
+    /** Appends up to n chapters after the last loaded one. Does not notify the adapter. */
+    private int appendFollowingChapters(int n) {
+        int added = 0;
+        while (added < n && lastLoadedBook != -1) {
+            int nextBook = lastLoadedBook, nextChapter = lastLoadedChapter + 1;
+            if (nextChapter > db.getChapterCount(lastLoadedBook)) {
+                nextBook = db.getNextBook(lastLoadedBook);
+                if (nextBook == -1) break;
+                nextChapter = 1;
             }
-            if (nextBook == -1) { loading = false; return; }
-            nextChapter = 1;
+            appendChapter(nextBook, nextChapter);
+            added++;
         }
-        appendChapter(nextBook, nextChapter);
-        adapter.notifyDataSetChanged();
+        return added;
+    }
+
+    /** Scroll-triggered lazy load: several chapters, one adapter notification, one layout pass. */
+    private void appendNextChapters(int n) {
+        loading = true;
+        if (appendFollowingChapters(n) > 0) adapter.notifyDataSetChanged();
         loading = false;
     }
 
@@ -203,11 +204,9 @@ public class ReaderPanel {
         loading = true;
         int prevBook = firstLoadedBook, prevChapter = firstLoadedChapter - 1;
         if (prevChapter < 1) {
-            List<int[]> books = db.getBooks();
-            int pb = -1;
-            for (int[] b : books) { if (b[0] == firstLoadedBook) break; pb = b[0]; }
-            if (pb == -1) { loading = false; return 0; }
-            prevBook = pb; prevChapter = db.getChapterCount(prevBook);
+            prevBook = db.getPrevBook(firstLoadedBook);
+            if (prevBook == -1) { loading = false; return 0; }
+            prevChapter = db.getChapterCount(prevBook);
         }
         String bookName = db.getBookName(prevBook);
         List<String[]> verses = db.getVerses(prevBook, prevChapter);
@@ -265,32 +264,22 @@ public class ReaderPanel {
     // --- Sync: scroll to specific verse ---
 
     public void syncToVerse(int bookNumber, int chapter, String verseNum) {
-        syncEnabled = false; // prevent feedback loop
-        // Ensure chapter is loaded
-        boolean found = false;
+        if (scrollToVerse(bookNumber, chapter, verseNum)) return;
+        // Chapter not loaded, reload from this chapter and try again
+        loadFrom(bookNumber, chapter);
+        scrollToVerse(bookNumber, chapter, verseNum);
+    }
+
+    private boolean scrollToVerse(int bookNumber, int chapter, String verseNum) {
         for (int i = 0; i < items.size(); i++) {
             ReadingItem it = items.get(i);
             if (it.type == TYPE_VERSE && it.bookNumber == bookNumber && it.chapter == chapter
                     && it.text1.equals(verseNum)) {
                 verseList.setSelectionFromTop(i, 0);
-                found = true;
-                break;
+                return true;
             }
         }
-        if (!found) {
-            // Chapter not loaded, reload from this chapter
-            loadFrom(bookNumber, chapter);
-            // Find verse again
-            for (int i = 0; i < items.size(); i++) {
-                ReadingItem it = items.get(i);
-                if (it.type == TYPE_VERSE && it.bookNumber == bookNumber && it.chapter == chapter
-                        && it.text1.equals(verseNum)) {
-                    verseList.setSelectionFromTop(i, 0);
-                    break;
-                }
-            }
-        }
-        syncEnabled = true;
+        return false;
     }
 
     // --- Navigation ---
@@ -298,27 +287,25 @@ public class ReaderPanel {
     private void navigatePrev() {
         int prevBook = currentBook, prevChapter = currentChapter - 1;
         if (prevChapter < 1) {
-            List<int[]> books = db.getBooks();
-            int pb = -1;
-            for (int[] b : books) { if (b[0] == currentBook) break; pb = b[0]; }
-            if (pb == -1) return;
-            prevBook = pb; prevChapter = db.getChapterCount(prevBook);
+            prevBook = db.getPrevBook(currentBook);
+            if (prevBook == -1) return;
+            prevChapter = db.getChapterCount(prevBook);
         }
         loadFrom(prevBook, prevChapter);
         verseList.setSelectionFromTop(0, 0);
+        if (syncListener != null) syncListener.onNavigated(this, currentBook, currentChapter);
     }
 
     private void navigateNext() {
         int nextBook = currentBook, nextChapter = currentChapter + 1;
         if (nextChapter > db.getChapterCount(currentBook)) {
-            List<int[]> books = db.getBooks();
-            boolean found = false; nextBook = -1;
-            for (int[] b : books) { if (found) { nextBook = b[0]; break; } if (b[0] == currentBook) found = true; }
+            nextBook = db.getNextBook(currentBook);
             if (nextBook == -1) return;
             nextChapter = 1;
         }
         loadFrom(nextBook, nextChapter);
         verseList.setSelectionFromTop(0, 0);
+        if (syncListener != null) syncListener.onNavigated(this, currentBook, currentChapter);
     }
 
     private void updateToolbar() {
@@ -466,6 +453,23 @@ public class ReaderPanel {
 
     public boolean isVerseListVisible() { return verseList.getVisibility() == View.VISIBLE; }
 
+    /** Get the first visible verse info: [bookNumber, chapter, verseNum]. Returns null if no verse visible. */
+    public int[] getFirstVisibleVerseInfo() {
+        int pos = verseList.getFirstVisiblePosition();
+        // Scan from first visible position to find a verse (skip headers)
+        for (int i = pos; i < Math.min(pos + 5, items.size()); i++) {
+            ReadingItem item = items.get(i);
+            if (item.type == TYPE_VERSE) {
+                try {
+                    return new int[]{item.bookNumber, item.chapter, Integer.parseInt(item.text1)};
+                } catch (NumberFormatException e) {
+                    return new int[]{item.bookNumber, item.chapter, 1};
+                }
+            }
+        }
+        return null;
+    }
+
     public void close() { db.close(); }
 
     // --- Adapter ---
@@ -485,14 +489,20 @@ public class ReaderPanel {
                 return cv;
             }
             if (cv == null) cv = activity.getLayoutInflater().inflate(R.layout.item_verse, parent, false);
-            Spanned verseText = TextCleaner.toSpanned(item.text2);
-            SpannableStringBuilder sb = new SpannableStringBuilder();
-            int start = sb.length(); sb.append(item.text1); sb.append(" "); int end = sb.length();
-            sb.setSpan(new SuperscriptSpan(), start, end - 1, 0);
-            sb.setSpan(new RelativeSizeSpan(0.7f), start, end - 1, 0);
-            sb.append(verseText);
-            ((TextView) cv.findViewById(R.id.verse_text)).setText(sb);
+            // Regex cleanup + Html.fromHtml are expensive; do them once per verse, not on every bind.
+            if (item.rendered == null) item.rendered = renderVerse(item);
+            ((TextView) cv.findViewById(R.id.verse_text)).setText(item.rendered);
             return cv;
+        }
+
+        private CharSequence renderVerse(ReadingItem item) {
+            SpannableStringBuilder sb = new SpannableStringBuilder();
+            sb.append(item.text1).append(' ');
+            int numEnd = item.text1.length();
+            sb.setSpan(new SuperscriptSpan(), 0, numEnd, 0);
+            sb.setSpan(new RelativeSizeSpan(0.7f), 0, numEnd, 0);
+            sb.append(TextCleaner.toSpanned(item.text2));
+            return sb;
         }
     }
 }

@@ -3,12 +3,15 @@ package com.bible.reader;
 import android.content.Context;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.util.SparseArray;
+import android.util.SparseIntArray;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 public class DatabaseHelper {
@@ -18,6 +21,13 @@ public class DatabaseHelper {
     private final Context context;
     private SQLiteDatabase db;
     private String currentModule;
+
+    // Book metadata cache for the open module. The books table is ~66 rows, but it used to be
+    // queried on every scroll event, every grid cell and every chapter append.
+    private List<int[]> books = Collections.emptyList();
+    private final SparseArray<String> longNames = new SparseArray<>();
+    private final SparseArray<String> shortNames = new SparseArray<>();
+    private final SparseIntArray chapterCounts = new SparseIntArray();
 
     public DatabaseHelper(Context context) {
         this.context = context.getApplicationContext();
@@ -42,6 +52,31 @@ public class DatabaseHelper {
             db = SQLiteDatabase.openDatabase(dbFile.getPath(), null, SQLiteDatabase.OPEN_READONLY);
         }
         currentModule = moduleFileName;
+        loadBookCache();
+    }
+
+    private void loadBookCache() {
+        List<int[]> list = new ArrayList<>();
+        Cursor c = db.rawQuery(
+                "SELECT book_number, long_name, short_name FROM books ORDER BY book_number", null);
+        try {
+            while (c.moveToNext()) {
+                int bn = c.getInt(0);
+                list.add(new int[]{bn});
+                longNames.put(bn, c.isNull(1) ? "" : c.getString(1));
+                shortNames.put(bn, c.isNull(2) ? "" : c.getString(2));
+            }
+        } finally {
+            c.close();
+        }
+        books = Collections.unmodifiableList(list);
+    }
+
+    private void clearBookCache() {
+        books = Collections.emptyList();
+        longNames.clear();
+        shortNames.clear();
+        chapterCounts.clear();
     }
 
     private void copyFromAssets(String moduleFileName, File targetFile) {
@@ -74,58 +109,52 @@ public class DatabaseHelper {
         }
     }
 
+    /** Book numbers of the open module in canonical order. Read-only, cached. */
     public List<int[]> getBooks() {
-        List<int[]> books = new ArrayList<>();
-        if (db == null) return books;
-        Cursor c = db.rawQuery(
-                "SELECT book_number FROM books ORDER BY book_number", null);
-        try {
-            while (c.moveToNext()) {
-                books.add(new int[]{c.getInt(0)});
-            }
-        } finally {
-            c.close();
-        }
         return books;
     }
 
-    public String getBookName(int bookNumber) {
-        if (db == null) return "";
-        Cursor c = db.rawQuery(
-                "SELECT long_name FROM books WHERE book_number=?",
-                new String[]{String.valueOf(bookNumber)});
-        try {
-            if (c.moveToFirst()) return c.getString(0);
-            return "";
-        } finally {
-            c.close();
+    /** Book number following the given one, or -1 if it is the last (or unknown). */
+    public int getNextBook(int bookNumber) {
+        for (int i = 0; i < books.size() - 1; i++) {
+            if (books.get(i)[0] == bookNumber) return books.get(i + 1)[0];
         }
+        return -1;
+    }
+
+    /** Book number preceding the given one, or -1 if it is the first (or unknown). */
+    public int getPrevBook(int bookNumber) {
+        for (int i = 1; i < books.size(); i++) {
+            if (books.get(i)[0] == bookNumber) return books.get(i - 1)[0];
+        }
+        return -1;
+    }
+
+    public String getBookName(int bookNumber) {
+        String name = longNames.get(bookNumber);
+        return name != null ? name : "";
     }
 
     public String getBookShortName(int bookNumber) {
-        if (db == null) return "";
-        Cursor c = db.rawQuery(
-                "SELECT short_name FROM books WHERE book_number=?",
-                new String[]{String.valueOf(bookNumber)});
-        try {
-            if (c.moveToFirst()) return c.getString(0);
-            return "";
-        } finally {
-            c.close();
-        }
+        String name = shortNames.get(bookNumber);
+        return name != null ? name : "";
     }
 
     public int getChapterCount(int bookNumber) {
+        int cached = chapterCounts.get(bookNumber, -1);
+        if (cached >= 0) return cached;
         if (db == null) return 0;
         Cursor c = db.rawQuery(
                 "SELECT MAX(chapter) FROM verses WHERE book_number=?",
                 new String[]{String.valueOf(bookNumber)});
+        int count = 0;
         try {
-            if (c.moveToFirst()) return c.getInt(0);
-            return 0;
+            if (c.moveToFirst()) count = c.getInt(0);
         } finally {
             c.close();
         }
+        chapterCounts.put(bookNumber, count);
+        return count;
     }
 
     public List<String[]> getVerses(int bookNumber, int chapter) {
@@ -163,7 +192,7 @@ public class DatabaseHelper {
     }
 
     /**
-     * Read description from a downloaded module's info table.
+     * Read the description from the info table of a downloaded module.
      */
     public String getModuleDescription(String moduleFileName) {
         File file = new File(ModuleDownloader.getModulesDir(context), moduleFileName);
@@ -189,15 +218,7 @@ public class DatabaseHelper {
      * Check if a book exists in the currently open module.
      */
     public boolean hasBook(int bookNumber) {
-        if (db == null) return false;
-        Cursor c = db.rawQuery(
-                "SELECT 1 FROM books WHERE book_number=? LIMIT 1",
-                new String[]{String.valueOf(bookNumber)});
-        try {
-            return c.moveToFirst();
-        } finally {
-            c.close();
-        }
+        return longNames.indexOfKey(bookNumber) >= 0;
     }
 
     public String getCurrentModule() {
@@ -210,5 +231,6 @@ public class DatabaseHelper {
             db = null;
         }
         currentModule = null;
+        clearBookCache();
     }
 }
