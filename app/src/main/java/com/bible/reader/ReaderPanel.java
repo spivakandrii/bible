@@ -2,6 +2,7 @@ package com.bible.reader;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.graphics.drawable.Drawable;
 import android.text.SpannableStringBuilder;
 import android.text.style.RelativeSizeSpan;
 import android.text.style.SuperscriptSpan;
@@ -41,7 +42,8 @@ public class ReaderPanel {
     final View root;
     private final DatabaseHelper db;
 
-    private TextView btnTranslation, btnReference, btnPrev, btnNext, btnSplit;
+    private TextView btnTranslation, btnReference, btnPrev, btnNext, btnBookmark, btnSplit;
+    private Drawable btnBookmarkBg;
     private ListView verseList, translationList;
     private GridView bookGrid, chapterGrid;
 
@@ -59,15 +61,21 @@ public class ReaderPanel {
 
     private OnScrollSyncListener syncListener;
 
+    /** Packed verse keys (see verseKey); -1 = none. Selection is per panel, the bookmark is shared. */
+    private int selectedKey = -1;
+    private int bookmarkKey = -1;
+
     static class ReadingItem {
-        int type, bookNumber, chapter;
+        int type, bookNumber, chapter, verse;
         String text1, text2;
         /** Verse number + parsed text, built on first display and reused by recycled views. */
         CharSequence rendered;
         ReadingItem(int type, int bookNumber, int chapter, String text1, String text2) {
             this.type = type; this.bookNumber = bookNumber; this.chapter = chapter;
             this.text1 = text1; this.text2 = text2;
+            this.verse = (type == TYPE_VERSE) ? parseVerse(text1) : 0;
         }
+        int key() { return verseKey(bookNumber, chapter, verse); }
     }
 
     public interface OnScrollSyncListener {
@@ -75,6 +83,7 @@ public class ReaderPanel {
         void onPickerOpened(ReaderPanel source);
         void onPickerClosed(ReaderPanel source);
         void onNavigated(ReaderPanel source, int bookNumber, int chapter);
+        void onBookmarkButton(ReaderPanel source);
     }
 
     public ReaderPanel(Activity activity, View root) {
@@ -87,6 +96,8 @@ public class ReaderPanel {
         btnPrev = (TextView) root.findViewById(R.id.btn_prev);
         btnNext = (TextView) root.findViewById(R.id.btn_next);
         btnSplit = (TextView) root.findViewById(R.id.btn_split);
+        btnBookmark = (TextView) root.findViewById(R.id.btn_bookmark);
+        btnBookmarkBg = btnBookmark.getBackground();
         verseList = (ListView) root.findViewById(R.id.verse_list);
         translationList = (ListView) root.findViewById(R.id.translation_list);
         bookGrid = (GridView) root.findViewById(R.id.book_grid);
@@ -141,11 +152,76 @@ public class ReaderPanel {
                 if (syncListener != null) syncListener.onSplitToggle();
             }
         });
+        btnBookmark.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (syncListener != null) syncListener.onBookmarkButton(ReaderPanel.this);
+            }
+        });
+        // Long-press selects a verse (gray row); the star button then saves it as the bookmark.
+        verseList.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
+            @Override public boolean onItemLongClick(AdapterView<?> par, View v, int p, long id) {
+                if (p < 0 || p >= items.size()) return false;
+                ReadingItem item = items.get(p);
+                if (item.type != TYPE_VERSE) return false;
+                int key = item.key();
+                selectedKey = (selectedKey == key) ? -1 : key;
+                adapter.notifyDataSetChanged();
+                updateBookmarkButton();
+                return true;
+            }
+        });
     }
 
     public void setSyncListener(OnScrollSyncListener listener) { this.syncListener = listener; }
 
     public void setSplitButtonText(String text) { btnSplit.setText(text); }
+
+    // --- Selection & bookmark ---
+
+    static int verseKey(int book, int chapter, int verse) { return book * 1000000 + chapter * 1000 + verse; }
+
+    static int parseVerse(String s) {
+        try { return Integer.parseInt(s); } catch (NumberFormatException e) { return 0; }
+    }
+
+    /** Verse selected by long-press as [book, chapter, verse], or null. */
+    public int[] getSelectedVerse() {
+        if (selectedKey == -1) return null;
+        return new int[]{selectedKey / 1000000, (selectedKey / 1000) % 1000, selectedKey % 1000};
+    }
+
+    public void clearSelection() {
+        if (selectedKey == -1) return;
+        selectedKey = -1;
+        adapter.notifyDataSetChanged();
+        updateBookmarkButton();
+    }
+
+    /** Marks the bookmarked verse with a star (book <= 0 clears). Re-renders only the two affected rows. */
+    public void setBookmark(int book, int chapter, int verse) {
+        int newKey = (book <= 0) ? -1 : verseKey(book, chapter, verse);
+        if (newKey == bookmarkKey) return;
+        int oldKey = bookmarkKey;
+        bookmarkKey = newKey;
+        for (ReadingItem it : items) {
+            if (it.type == TYPE_VERSE && it.rendered != null) {
+                int k = it.key();
+                if (k == oldKey || k == newKey) it.rendered = null;
+            }
+        }
+        adapter.notifyDataSetChanged();
+    }
+
+    /** Inverted while a verse is selected: pressing the star now saves instead of jumping. */
+    private void updateBookmarkButton() {
+        if (selectedKey != -1) {
+            btnBookmark.setBackgroundColor(0xFF000000);
+            btnBookmark.setTextColor(0xFFFFFFFF);
+        } else {
+            btnBookmark.setBackground(btnBookmarkBg);
+            btnBookmark.setTextColor(0xFF000000);
+        }
+    }
 
     public void init(String module, int book, int chapter) {
         currentModule = module;
@@ -159,6 +235,8 @@ public class ReaderPanel {
 
     public void loadFrom(int bookNumber, int chapter) {
         items.clear();
+        selectedKey = -1;
+        updateBookmarkButton();
         lastLoadedBook = -1; lastLoadedChapter = -1;
         firstLoadedBook = bookNumber; firstLoadedChapter = chapter;
         appendChapter(bookNumber, chapter);
@@ -471,6 +549,7 @@ public class ReaderPanel {
 
     public boolean onBackPressed() {
         if (chapterPickerVisible) { showBookPicker(); return true; }
+        if (selectedKey != -1 && isVerseListVisible()) { clearSelection(); return true; }
         if (bookPickerVisible || translationPickerVisible) { hideAllPickers(); return true; }
         return false;
     }
@@ -484,11 +563,7 @@ public class ReaderPanel {
         for (int i = pos; i < Math.min(pos + 5, items.size()); i++) {
             ReadingItem item = items.get(i);
             if (item.type == TYPE_VERSE) {
-                try {
-                    return new int[]{item.bookNumber, item.chapter, Integer.parseInt(item.text1)};
-                } catch (NumberFormatException e) {
-                    return new int[]{item.bookNumber, item.chapter, 1};
-                }
+                return new int[]{item.bookNumber, item.chapter, item.verse > 0 ? item.verse : 1};
             }
         }
         return null;
@@ -516,15 +591,19 @@ public class ReaderPanel {
             // Regex cleanup + Html.fromHtml are expensive; do them once per verse, not on every bind.
             if (item.rendered == null) item.rendered = renderVerse(item);
             ((TextView) cv.findViewById(R.id.verse_text)).setText(item.rendered);
+            if (selectedKey != -1 && item.key() == selectedKey) cv.setBackgroundColor(0xFFDDDDDD);
+            else cv.setBackground(null);
             return cv;
         }
 
         private CharSequence renderVerse(ReadingItem item) {
             SpannableStringBuilder sb = new SpannableStringBuilder();
+            if (bookmarkKey != -1 && item.key() == bookmarkKey) sb.append("★ ");
+            int start = sb.length();
             sb.append(item.text1).append(' ');
-            int numEnd = item.text1.length();
-            sb.setSpan(new SuperscriptSpan(), 0, numEnd, 0);
-            sb.setSpan(new RelativeSizeSpan(0.7f), 0, numEnd, 0);
+            int numEnd = start + item.text1.length();
+            sb.setSpan(new SuperscriptSpan(), start, numEnd, 0);
+            sb.setSpan(new RelativeSizeSpan(0.7f), start, numEnd, 0);
             sb.append(TextCleaner.toSpanned(item.text2));
             return sb;
         }

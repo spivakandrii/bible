@@ -17,6 +17,9 @@ public class ReaderActivity extends Activity implements ReaderPanel.OnScrollSync
     private static final String PREF_SCROLL_OFFSET = "scroll_offset";
     private static final String PREF_SPLIT = "split_enabled";
     private static final String PREF_MODULE2 = "module2";
+    private static final String PREF_BM_BOOK = "bm_book";
+    private static final String PREF_BM_CHAPTER = "bm_chapter";
+    private static final String PREF_BM_VERSE = "bm_verse";
 
     private static final String DEFAULT_MODULE = "UBIO'88.SQLite3";
     private static final String DEFAULT_MODULE2 = "KJV+.SQLite3";
@@ -32,6 +35,8 @@ public class ReaderActivity extends Activity implements ReaderPanel.OnScrollSync
     private View panel2Root;
     private View panelDivider;
     private boolean splitMode = false;
+    /** The single bookmark; bmBook <= 0 means none. Saved to prefs immediately on change. */
+    private int bmBook = -1, bmChapter, bmVerse;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -52,8 +57,12 @@ public class ReaderActivity extends Activity implements ReaderPanel.OnScrollSync
         int chapter = prefs.getInt(PREF_CHAPTER, DEFAULT_CHAPTER);
         module2 = prefs.getString(PREF_MODULE2, DEFAULT_MODULE2);
         splitMode = prefs.getBoolean(PREF_SPLIT, false);
+        bmBook = prefs.getInt(PREF_BM_BOOK, -1);
+        bmChapter = prefs.getInt(PREF_BM_CHAPTER, 1);
+        bmVerse = prefs.getInt(PREF_BM_VERSE, 1);
 
         panel1.init(module1, book, chapter);
+        panel1.setBookmark(bmBook, bmChapter, bmVerse);
 
         // Restore scroll position for panel1
         int pos = prefs.getInt(PREF_SCROLL_POS, 0);
@@ -83,6 +92,29 @@ public class ReaderActivity extends Activity implements ReaderPanel.OnScrollSync
         panel2 = new ReaderPanel(this, panel2Root);
         panel2.setSyncListener(this);
         panel2.init(module2, panel1.currentBook, panel1.currentChapter);
+        panel2.setBookmark(bmBook, bmChapter, bmVerse);
+    }
+
+    // --- Bookmark: a single slot. Star with a selected verse saves it; star without a selection jumps to it ---
+
+    @Override
+    public void onBookmarkButton(ReaderPanel source) {
+        int[] sel = source.getSelectedVerse();
+        if (sel != null) {
+            bmBook = sel[0]; bmChapter = sel[1]; bmVerse = sel[2];
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                    .putInt(PREF_BM_BOOK, bmBook)
+                    .putInt(PREF_BM_CHAPTER, bmChapter)
+                    .putInt(PREF_BM_VERSE, bmVerse)
+                    .apply();
+            source.clearSelection();
+            panel1.setBookmark(bmBook, bmChapter, bmVerse);
+            if (panel2 != null) panel2.setBookmark(bmBook, bmChapter, bmVerse);
+        } else if (bmBook > 0) {
+            String verse = String.valueOf(bmVerse);
+            source.syncToVerse(bmBook, bmChapter, verse);
+            if (splitMode) (source == panel1 ? panel2 : panel1).syncToVerse(bmBook, bmChapter, verse);
+        }
     }
 
     private void showSplit() {

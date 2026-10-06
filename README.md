@@ -11,6 +11,7 @@ Zero dependencies. Pure Android SDK. Instant launch.
 - **Inline translation switching** — tap translation name, pick from list, stays on same book/chapter
 - **Book & chapter grid** — tap reference to pick book (6-col grid) then chapter (adaptive grid)
 - **Prev/Next navigation** — arrow buttons for quick chapter browsing (crosses book boundaries)
+- **Bookmark** — long-press a verse and tap ★ to save it; tap ★ with nothing selected to jump back (single slot, overwritten on save)
 - **Infinite scroll** — lazy loading forward and backward, from Genesis to Revelation
 - **2800+ downloadable Bibles** in 900+ languages via MyBible module repository
 - **State persistence** — remembers module, book, chapter, and scroll position across launches
