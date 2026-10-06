@@ -19,10 +19,6 @@
             </intent-filter>
         </activity>
 
-        <activity android:name=".TranslationActivity" />
-        <activity android:name=".BookListActivity" />
-        <activity android:name=".ChapterListActivity" />
-        <activity android:name=".VerseActivity" />
         <activity android:name=".DownloadLanguagesActivity" />
         <activity android:name=".DownloadModulesActivity" />
 

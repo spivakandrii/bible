@@ -14,7 +14,7 @@ Zero dependencies. Pure Android SDK. Instant launch.
 - **Infinite scroll** — lazy loading forward and backward, from Genesis to Revelation
 - **2800+ downloadable Bibles** in 900+ languages via MyBible module repository
 - **State persistence** — remembers module, book, chapter, and scroll position across launches
-- **Ultra-fast** — ~43MB APK, direct SQLite access, no frameworks
+- **Ultra-fast** — ~33MB APK, direct SQLite access, no frameworks
 
 ## E-Ink Optimization (BOOX)
 
