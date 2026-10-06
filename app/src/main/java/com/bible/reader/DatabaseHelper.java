@@ -28,6 +28,7 @@ public class DatabaseHelper {
     private final SparseArray<String> longNames = new SparseArray<>();
     private final SparseArray<String> shortNames = new SparseArray<>();
     private final SparseIntArray chapterCounts = new SparseIntArray();
+    private final SparseArray<int[]> verseCounts = new SparseArray<>();
 
     public DatabaseHelper(Context context) {
         this.context = context.getApplicationContext();
@@ -77,6 +78,7 @@ public class DatabaseHelper {
         longNames.clear();
         shortNames.clear();
         chapterCounts.clear();
+        verseCounts.clear();
     }
 
     private void copyFromAssets(String moduleFileName, File targetFile) {
@@ -155,6 +157,38 @@ public class DatabaseHelper {
         }
         chapterCounts.put(bookNumber, count);
         return count;
+    }
+
+    /**
+     * Verses per chapter of a book, indexed by chapter number (index 0 unused); empty if the
+     * book is absent. Cached per module; this is what VerseMapper aligns translations with.
+     */
+    public int[] getChapterVerseCounts(int bookNumber) {
+        int[] cached = verseCounts.get(bookNumber);
+        if (cached != null) return cached;
+        int[] counts = new int[0];
+        if (db != null) {
+            Cursor c = db.rawQuery(
+                    "SELECT chapter, COUNT(*) FROM verses WHERE book_number=? GROUP BY chapter ORDER BY chapter",
+                    new String[]{String.valueOf(bookNumber)});
+            try {
+                List<int[]> rows = new ArrayList<>();
+                int max = 0;
+                while (c.moveToNext()) {
+                    int ch = c.getInt(0);
+                    rows.add(new int[]{ch, c.getInt(1)});
+                    if (ch > max) max = ch;
+                }
+                if (max > 0) {
+                    counts = new int[max + 1];
+                    for (int[] r : rows) if (r[0] > 0) counts[r[0]] = r[1];
+                }
+            } finally {
+                c.close();
+            }
+        }
+        verseCounts.put(bookNumber, counts);
+        return counts;
     }
 
     public List<String[]> getVerses(int bookNumber, int chapter) {

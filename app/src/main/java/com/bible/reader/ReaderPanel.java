@@ -64,6 +64,7 @@ public class ReaderPanel {
     /** Packed verse keys (see verseKey); -1 = none. Selection is per panel, the bookmark is shared. */
     private int selectedKey = -1;
     private int bookmarkKey = -1;
+    private boolean userScrolling;
 
     static class ReadingItem {
         int type, bookNumber, chapter, verse;
@@ -84,6 +85,10 @@ public class ReaderPanel {
         void onPickerClosed(ReaderPanel source);
         void onNavigated(ReaderPanel source, int bookNumber, int chapter);
         void onBookmarkButton(ReaderPanel source);
+        /** The user finished a touch scroll or fling in this panel. */
+        void onUserScrollIdle(ReaderPanel source);
+        /** This panel now shows another translation, loaded at the same chapter number. */
+        void onTranslationSwitched(ReaderPanel source);
     }
 
     public ReaderPanel(Activity activity, View root) {
@@ -112,9 +117,16 @@ public class ReaderPanel {
         EinkHelper.setPartialUpdate(chapterGrid);
 
         verseList.setOnScrollListener(new AbsListView.OnScrollListener() {
-            @Override public void onScrollStateChanged(AbsListView view, int scrollState) {}
+            @Override public void onScrollStateChanged(AbsListView view, int scrollState) {
+                // Only touch scrolls and flings change the state; programmatic setSelectionFromTop
+                // does not, so this cannot loop between the two panels.
+                boolean idle = scrollState == SCROLL_STATE_IDLE;
+                if (userScrolling && idle && syncListener != null) syncListener.onUserScrollIdle(ReaderPanel.this);
+                userScrolling = !idle;
+            }
             @Override
             public void onScroll(AbsListView view, int firstVisible, int visibleCount, int totalCount) {
+                pendingTop = null; // called at the end of every layout pass: the list is where it should be
                 if (firstVisible >= 0 && firstVisible < items.size()) {
                     ReadingItem item = items.get(firstVisible);
                     if (item.bookNumber != currentBook || item.chapter != currentChapter) {
@@ -166,9 +178,9 @@ public class ReaderPanel {
                 if (p < 0 || p >= items.size()) return false;
                 ReadingItem item = items.get(p);
                 if (item.type != TYPE_VERSE) return false;
-                int key = item.key();
+                int key = item.key(), old = selectedKey;
                 selectedKey = (selectedKey == key) ? -1 : key;
-                adapter.notifyDataSetChanged();
+                rebindRows(old, key);
                 updateBookmarkButton();
                 return true;
             }
@@ -179,9 +191,13 @@ public class ReaderPanel {
 
     public void setSplitButtonText(String text) { btnSplit.setText(text); }
 
+    DatabaseHelper db() { return db; }
+
     // --- Selection & bookmark ---
 
     static int verseKey(int book, int chapter, int verse) { return book * 1000000 + chapter * 1000 + verse; }
+
+    static int verseKey(int[] ref) { return verseKey(ref[0], ref[1], ref[2]); }
 
     static int parseVerse(String s) {
         try { return Integer.parseInt(s); } catch (NumberFormatException e) { return 0; }
@@ -195,8 +211,9 @@ public class ReaderPanel {
 
     public void clearSelection() {
         if (selectedKey == -1) return;
+        int old = selectedKey;
         selectedKey = -1;
-        adapter.notifyDataSetChanged();
+        rebindRows(old, -1);
         updateBookmarkButton();
     }
 
@@ -212,7 +229,24 @@ public class ReaderPanel {
                 if (k == oldKey || k == newKey) it.rendered = null;
             }
         }
-        adapter.notifyDataSetChanged();
+        rebindRows(oldKey, newKey);
+    }
+
+    /**
+     * Re-binds the visible rows of the two verse keys in place. notifyDataSetChanged would do
+     * the same job but, if it lands between a loadFrom and the next layout, the ListView
+     * restores the first position of the previous list and the panel ends up on a random verse.
+     */
+    private void rebindRows(int keyA, int keyB) {
+        int first = verseList.getFirstVisiblePosition();
+        for (int i = 0; i < verseList.getChildCount(); i++) {
+            int pos = first + i;
+            if (pos < 0 || pos >= items.size()) continue;
+            ReadingItem it = items.get(pos);
+            if (it.type != TYPE_VERSE) continue;
+            int k = it.key();
+            if (k == keyA || k == keyB) adapter.getView(pos, verseList.getChildAt(i), verseList);
+        }
     }
 
     /** Inverted while a verse is selected: pressing the star now saves instead of jumping. */
@@ -234,6 +268,37 @@ public class ReaderPanel {
         loadFrom(currentBook, currentChapter);
     }
 
+    // --- List position ---
+    // The panel remembers where it told the list to go until the list has laid out, because
+    // getFirstVisiblePosition() is stale in between and a notifyDataSetChanged in that window
+    // makes the ListView snap back to that stale position.
+
+    /** {position, offset} requested by moveTo and not yet laid out; null otherwise. */
+    private int[] pendingTop;
+
+    private void moveTo(int position, int offset) {
+        pendingTop = new int[]{position, offset};
+        verseList.setSelectionFromTop(position, offset);
+    }
+
+    /** The position that is, or is about to be, at the top of the list. */
+    private int topPosition() {
+        return pendingTop != null ? pendingTop[0] : verseList.getFirstVisiblePosition();
+    }
+
+    private int topOffset() {
+        if (pendingTop != null) return pendingTop[1];
+        View fc = verseList.getChildAt(0);
+        return fc != null ? fc.getTop() - verseList.getPaddingTop() : 0;
+    }
+
+    /** {position, offset} to persist and hand back to restorePosition. */
+    public int[] getTopPosition() { return new int[]{topPosition(), topOffset()}; }
+
+    public void restorePosition(int position, int offset) {
+        if (position >= 0 && position < items.size()) moveTo(position, offset);
+    }
+
     // --- Continuous reading ---
 
     public void loadFrom(int bookNumber, int chapter) {
@@ -245,6 +310,7 @@ public class ReaderPanel {
         appendChapter(bookNumber, chapter);
         appendFollowingChapters(INITIAL_LOOKAHEAD);
         adapter.notifyDataSetChanged();
+        moveTo(0, 0);
         currentBook = bookNumber; currentChapter = chapter;
         updateToolbar();
     }
@@ -276,19 +342,21 @@ public class ReaderPanel {
     /** Scroll-triggered lazy load forward: several chapters, one adapter notification, one layout pass. */
     private final Runnable appendRunnable = new Runnable() {
         @Override public void run() {
-            if (appendFollowingChapters(SCROLL_LOOKAHEAD) > 0) adapter.notifyDataSetChanged();
+            if (appendFollowingChapters(SCROLL_LOOKAHEAD) > 0) {
+                adapter.notifyDataSetChanged();
+                // notify makes the list re-sync to its stale first position; re-assert a pending move
+                if (pendingTop != null) verseList.setSelectionFromTop(pendingTop[0], pendingTop[1]);
+            }
             loading = false;
         }
     };
 
-    /** Scroll-triggered lazy load backward; keeps the first visible row exactly where it is. */
+    /** Scroll-triggered lazy load backward; keeps the top row exactly where it is (or is going). */
     private final Runnable prependRunnable = new Runnable() {
         @Override public void run() {
-            int first = verseList.getFirstVisiblePosition();
-            View fc = verseList.getChildAt(0);
-            int offset = (fc != null) ? fc.getTop() - verseList.getPaddingTop() : 0;
+            int first = topPosition(), offset = topOffset();
             int added = prependPreviousChapter();
-            if (added > 0) verseList.setSelectionFromTop(first + added, offset);
+            if (added > 0) moveTo(first + added, offset);
             loading = false;
         }
     };
@@ -328,13 +396,13 @@ public class ReaderPanel {
             if (child == null) continue;
             accumulated += child.getHeight();
             if (accumulated >= targetScroll) {
-                verseList.setSelectionFromTop(firstVisible + i, -(accumulated - targetScroll));
+                moveTo(firstVisible + i, -(accumulated - targetScroll));
                 return;
             }
         }
         int avgH = listHeight / Math.max(1, childCount);
         int skip = targetScroll / Math.max(1, avgH);
-        verseList.setSelectionFromTop(Math.min(firstVisible + skip, items.size() - 1), 0);
+        moveTo(Math.min(firstVisible + skip, items.size() - 1), 0);
     }
 
     public void pageUp() {
@@ -350,28 +418,135 @@ public class ReaderPanel {
         int avgH = totalH / Math.max(1, childCount);
         int skip = targetScroll / Math.max(1, avgH);
         int newPos = Math.max(0, firstVisible - skip);
-        verseList.setSelectionFromTop(newPos, firstOffset + targetScroll - (skip * avgH));
+        moveTo(newPos, firstOffset + targetScroll - (skip * avgH));
     }
 
-    // --- Sync: scroll to specific verse ---
+    // --- Sync: scroll to a specific verse ---
 
-    public void syncToVerse(int bookNumber, int chapter, String verseNum) {
-        if (scrollToVerse(bookNumber, chapter, verseNum)) return;
-        // Chapter not loaded, reload from this chapter and try again
+    public void syncToVerse(int[] ref) { syncToVerse(ref[0], ref[1], ref[2]); }
+
+    public void syncToVerse(int bookNumber, int chapter, int verse) {
+        if (scrollToVerse(bookNumber, chapter, verse)) return;
+        // Chapter not loaded: reload from it and try again
         loadFrom(bookNumber, chapter);
-        scrollToVerse(bookNumber, chapter, verseNum);
+        scrollToVerse(bookNumber, chapter, verse);
     }
 
-    private boolean scrollToVerse(int bookNumber, int chapter, String verseNum) {
+    /**
+     * Puts the verse at the top. A verse number missing from this translation falls back to the
+     * next one in the chapter, or the last one; returns false only if the chapter is not loaded.
+     */
+    private boolean scrollToVerse(int bookNumber, int chapter, int verse) {
+        int next = -1, last = -1;
         for (int i = 0; i < items.size(); i++) {
             ReadingItem it = items.get(i);
-            if (it.type == TYPE_VERSE && it.bookNumber == bookNumber && it.chapter == chapter
-                    && it.text1.equals(verseNum)) {
-                verseList.setSelectionFromTop(i, 0);
-                return true;
+            if (it.type != TYPE_VERSE || it.bookNumber != bookNumber || it.chapter != chapter) continue;
+            if (it.verse == verse) { moveTo(i, 0); return true; }
+            if (it.verse > verse && next == -1) next = i;
+            last = i;
+        }
+        int pos = next != -1 ? next : last;
+        if (pos == -1) return false;
+        moveTo(pos, 0);
+        return true;
+    }
+
+    // --- Visible verses and verse arithmetic (split-screen paging) ---
+
+    /** First verse whose row is at least partly visible, as {book, chapter, verse}; null if none. */
+    public int[] getFirstVisibleVerse() {
+        int pos = topPosition();
+        for (int i = pos; i < Math.min(pos + 5, items.size()); i++) {
+            ReadingItem item = items.get(i);
+            if (item.type == TYPE_VERSE) return ref(item);
+        }
+        return null;
+    }
+
+    /** Last verse whose row lies entirely inside the list; null if no verse row fits. */
+    public int[] getLastFullyVisibleVerse() {
+        int first = verseList.getFirstVisiblePosition();
+        for (int i = verseList.getChildCount() - 1; i >= 0; i--) {
+            if (!rowFullyVisible(verseList.getChildAt(i))) continue;
+            int pos = first + i;
+            if (pos < 0 || pos >= items.size()) continue;
+            ReadingItem item = items.get(pos);
+            if (item.type == TYPE_VERSE) return ref(item);
+        }
+        return null;
+    }
+
+    /** Number of verse rows lying entirely inside the list: how many verses a page holds here. */
+    public int countFullyVisibleVerses() {
+        int first = verseList.getFirstVisiblePosition(), n = 0;
+        for (int i = 0; i < verseList.getChildCount(); i++) {
+            int pos = first + i;
+            if (pos >= 0 && pos < items.size() && items.get(pos).type == TYPE_VERSE
+                    && rowFullyVisible(verseList.getChildAt(i))) n++;
+        }
+        return n;
+    }
+
+    private boolean rowFullyVisible(View row) {
+        return row != null && row.getTop() >= verseList.getPaddingTop()
+                && row.getBottom() <= verseList.getHeight() - verseList.getPaddingBottom();
+    }
+
+    /** The verse after ref, crossing chapter and book boundaries; null after the last verse. */
+    public int[] verseAfter(int[] ref) {
+        int idx = indexOfVerse(ref);
+        if (idx >= 0) {
+            for (int j = idx + 1; j < items.size(); j++) {
+                if (items.get(j).type == TYPE_VERSE) return ref(items.get(j));
             }
         }
-        return false;
+        // Not loaded: step by chapter sizes
+        int book = ref[0], chapter = ref[1], verse = ref[2];
+        if (verse < versesIn(book, chapter)) return new int[]{book, chapter, verse + 1};
+        if (chapter < db.getChapterCount(book)) return new int[]{book, chapter + 1, 1};
+        int next = db.getNextBook(book);
+        return next == -1 ? null : new int[]{next, 1, 1};
+    }
+
+    /** The verse n positions before ref, crossing chapter and book boundaries; stops at the first verse. */
+    public int[] verseBefore(int[] ref, int n) {
+        int idx = indexOfVerse(ref);
+        int[] cur = ref;
+        if (idx >= 0) {
+            for (int j = idx - 1; j >= 0 && n > 0; j--) {
+                if (items.get(j).type == TYPE_VERSE) { cur = ref(items.get(j)); n--; }
+            }
+        }
+        // Whatever is left runs past the loaded items: step by chapter sizes
+        int book = cur[0], chapter = cur[1], verse = cur[2];
+        while (n-- > 0) {
+            if (verse > 1) { verse--; continue; }
+            if (chapter > 1) { chapter--; verse = Math.max(1, versesIn(book, chapter)); continue; }
+            int prev = db.getPrevBook(book);
+            if (prev == -1) break;
+            book = prev;
+            chapter = Math.max(1, db.getChapterCount(book));
+            verse = Math.max(1, versesIn(book, chapter));
+        }
+        return new int[]{book, chapter, verse};
+    }
+
+    private int versesIn(int book, int chapter) {
+        int[] counts = db.getChapterVerseCounts(book);
+        return chapter < counts.length ? counts[chapter] : 0;
+    }
+
+    private int indexOfVerse(int[] ref) {
+        int key = verseKey(ref);
+        for (int i = 0; i < items.size(); i++) {
+            ReadingItem it = items.get(i);
+            if (it.type == TYPE_VERSE && it.key() == key) return i;
+        }
+        return -1;
+    }
+
+    private static int[] ref(ReadingItem item) {
+        return new int[]{item.bookNumber, item.chapter, item.verse > 0 ? item.verse : 1};
     }
 
     // --- Navigation ---
@@ -384,7 +559,6 @@ public class ReaderPanel {
             prevChapter = db.getChapterCount(prevBook);
         }
         loadFrom(prevBook, prevChapter);
-        verseList.setSelectionFromTop(0, 0);
         if (syncListener != null) syncListener.onNavigated(this, currentBook, currentChapter);
     }
 
@@ -396,7 +570,6 @@ public class ReaderPanel {
             nextChapter = 1;
         }
         loadFrom(nextBook, nextChapter);
-        verseList.setSelectionFromTop(0, 0);
         if (syncListener != null) syncListener.onNavigated(this, currentBook, currentChapter);
     }
 
@@ -458,8 +631,7 @@ public class ReaderPanel {
             if (currentChapter > max) currentChapter = max;
         }
         loadFrom(currentBook, currentChapter);
-        verseList.setSelectionFromTop(0, 0);
-        if (syncListener != null) syncListener.onNavigated(this, currentBook, currentChapter);
+        if (syncListener != null) syncListener.onTranslationSwitched(this);
     }
 
     // --- Book/Chapter picker ---
@@ -553,7 +725,7 @@ public class ReaderPanel {
         chapterGrid.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override public void onItemClick(AdapterView<?> par, View v, int p, long id) {
                 currentBook = bookNumber; currentChapter = p + 1;
-                hideAllPickers(); loadFrom(currentBook, currentChapter); verseList.setSelectionFromTop(0, 0);
+                hideAllPickers(); loadFrom(currentBook, currentChapter);
                 if (syncListener != null) syncListener.onNavigated(ReaderPanel.this, currentBook, currentChapter);
             }
         });
@@ -569,19 +741,6 @@ public class ReaderPanel {
     }
 
     public boolean isVerseListVisible() { return verseList.getVisibility() == View.VISIBLE; }
-
-    /** Get the first visible verse info: [bookNumber, chapter, verseNum]. Returns null if no verse visible. */
-    public int[] getFirstVisibleVerseInfo() {
-        int pos = verseList.getFirstVisiblePosition();
-        // Scan from first visible position to find a verse (skip headers)
-        for (int i = pos; i < Math.min(pos + 5, items.size()); i++) {
-            ReadingItem item = items.get(i);
-            if (item.type == TYPE_VERSE) {
-                return new int[]{item.bookNumber, item.chapter, item.verse > 0 ? item.verse : 1};
-            }
-        }
-        return null;
-    }
 
     public void close() { db.close(); }
 

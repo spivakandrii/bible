@@ -5,7 +5,7 @@ import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.view.KeyEvent;
 import android.view.View;
-import android.widget.ListView;
+import android.view.ViewTreeObserver;
 
 public class ReaderActivity extends Activity implements ReaderPanel.OnScrollSyncListener {
 
@@ -20,6 +20,7 @@ public class ReaderActivity extends Activity implements ReaderPanel.OnScrollSync
     private static final String PREF_BM_BOOK = "bm_book";
     private static final String PREF_BM_CHAPTER = "bm_chapter";
     private static final String PREF_BM_VERSE = "bm_verse";
+    private static final String PREF_BM_MODULE = "bm_module";
 
     private static final String DEFAULT_MODULE = "UBIO'88.SQLite3";
     private static final String DEFAULT_MODULE2 = "KJV+.SQLite3";
@@ -35,8 +36,15 @@ public class ReaderActivity extends Activity implements ReaderPanel.OnScrollSync
     private View panel2Root;
     private View panelDivider;
     private boolean splitMode = false;
-    /** The single bookmark; bmBook <= 0 means none. Saved to prefs immediately on change. */
+
+    /**
+     * The single bookmark, stored in the numbering of the module it was taken in (bmModule);
+     * bmBook <= 0 means none. Saved to prefs immediately on change.
+     */
     private int bmBook = -1, bmChapter, bmVerse;
+    private String bmModule;
+    /** Opened only when the bookmark's module is in neither panel, to map its numbering. */
+    private DatabaseHelper bmDb;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -60,9 +68,10 @@ public class ReaderActivity extends Activity implements ReaderPanel.OnScrollSync
         bmBook = prefs.getInt(PREF_BM_BOOK, -1);
         bmChapter = prefs.getInt(PREF_BM_CHAPTER, 1);
         bmVerse = prefs.getInt(PREF_BM_VERSE, 1);
+        bmModule = prefs.getString(PREF_BM_MODULE, null);
 
         panel1.init(module1, book, chapter);
-        panel1.setBookmark(bmBook, bmChapter, bmVerse);
+        applyBookmarkMarkers();
 
         // Restore scroll position for panel1
         int pos = prefs.getInt(PREF_SCROLL_POS, 0);
@@ -72,8 +81,8 @@ public class ReaderActivity extends Activity implements ReaderPanel.OnScrollSync
         panel1.root.post(new Runnable() {
             @Override
             public void run() {
-                ListView vl = (ListView) panel1.root.findViewById(R.id.verse_list);
-                if (vl != null && fPos < vl.getCount()) vl.setSelectionFromTop(fPos, fOffset);
+                panel1.restorePosition(fPos, fOffset);
+                if (splitMode) alignPanel2ToPanel1();
             }
         });
 
@@ -92,29 +101,7 @@ public class ReaderActivity extends Activity implements ReaderPanel.OnScrollSync
         panel2 = new ReaderPanel(this, panel2Root);
         panel2.setSyncListener(this);
         panel2.init(module2, panel1.currentBook, panel1.currentChapter);
-        panel2.setBookmark(bmBook, bmChapter, bmVerse);
-    }
-
-    // --- Bookmark: a single slot. Star with a selected verse saves it; star without a selection jumps to it ---
-
-    @Override
-    public void onBookmarkButton(ReaderPanel source) {
-        int[] sel = source.getSelectedVerse();
-        if (sel != null) {
-            bmBook = sel[0]; bmChapter = sel[1]; bmVerse = sel[2];
-            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
-                    .putInt(PREF_BM_BOOK, bmBook)
-                    .putInt(PREF_BM_CHAPTER, bmChapter)
-                    .putInt(PREF_BM_VERSE, bmVerse)
-                    .apply();
-            source.clearSelection();
-            panel1.setBookmark(bmBook, bmChapter, bmVerse);
-            if (panel2 != null) panel2.setBookmark(bmBook, bmChapter, bmVerse);
-        } else if (bmBook > 0) {
-            String verse = String.valueOf(bmVerse);
-            source.syncToVerse(bmBook, bmChapter, verse);
-            if (splitMode) (source == panel1 ? panel2 : panel1).syncToVerse(bmBook, bmChapter, verse);
-        }
+        applyBookmarkMarkers();
     }
 
     private void showSplit() {
@@ -124,7 +111,7 @@ public class ReaderActivity extends Activity implements ReaderPanel.OnScrollSync
         panelDivider.setVisibility(View.VISIBLE);
         panel1.setSplitButtonText("✕");
         panel2.setSplitButtonText("✕");
-        panel2.syncToVerse(panel1.currentBook, panel1.currentChapter, "1");
+        alignPanel2ToPanel1();
     }
 
     private void hideSplit() {
@@ -159,29 +146,115 @@ public class ReaderActivity extends Activity implements ReaderPanel.OnScrollSync
         }
     }
 
-    // --- Navigation sync: when one panel navigates, sync the other ---
+    // --- Keeping the two panels on the same verse ---
+    // Translations number chapters and verses differently (Hebrew vs English chapter breaks,
+    // Septuagint psalms, numbered psalm titles), so every cross-panel reference goes through
+    // VerseMapper and the panels agree on the real verse, not on the printed number.
+
+    private ReaderPanel other(ReaderPanel panel) { return panel == panel1 ? panel2 : panel1; }
+
+    /** Scrolls target to the verse ref, given in source numbering, converted to target numbering. */
+    private static void syncMapped(ReaderPanel source, ReaderPanel target, int[] ref) {
+        int[] mapped = VerseMapper.map(source.db(), target.db(), ref);
+        if (mapped != null) target.syncToVerse(mapped);
+    }
+
+    /** Puts panel2 on the verse panel1 shows at the top. */
+    private void alignPanel2ToPanel1() {
+        if (panel2 == null) return;
+        int[] top = panel1.getFirstVisibleVerse();
+        if (top == null) top = new int[]{panel1.currentBook, panel1.currentChapter, 1};
+        syncMapped(panel1, panel2, top);
+    }
+
+    /** Same, once panel1 has actually laid out whatever it was just told to show. */
+    private void alignAfterLayout() {
+        final ViewTreeObserver vto = panel1.root.getViewTreeObserver();
+        vto.addOnGlobalLayoutListener(new ViewTreeObserver.OnGlobalLayoutListener() {
+            @Override public void onGlobalLayout() {
+                ViewTreeObserver live = panel1.root.getViewTreeObserver();
+                if (live.isAlive()) live.removeOnGlobalLayoutListener(this);
+                alignPanel2ToPanel1();
+            }
+        });
+    }
 
     @Override
     public void onNavigated(ReaderPanel source, int bookNumber, int chapter) {
         if (!splitMode) return;
-        ReaderPanel target = (source == panel1) ? panel2 : panel1;
-        target.syncToVerse(bookNumber, chapter, "1");
+        syncMapped(source, other(source), new int[]{bookNumber, chapter, 1});
     }
 
-    // --- Page-turn sync: panel2 follows panel1 only on discrete events, never on continuous scroll ---
-
-    private void syncPanel2ToPanel1() {
+    @Override
+    public void onTranslationSwitched(ReaderPanel source) {
+        applyBookmarkMarkers(); // the star moves to this translation's numbering
         if (!splitMode) return;
-        // Post to run after panel1's layout update from pageDown/pageUp
-        panel1.root.post(new Runnable() {
-            @Override
-            public void run() {
-                int[] info = panel1.getFirstVisibleVerseInfo();
-                if (info != null) {
-                    panel2.syncToVerse(info[0], info[1], String.valueOf(info[2]));
-                }
-            }
-        });
+        // The panel that changed translation follows the other one, which did not move
+        ReaderPanel other = other(source);
+        int[] top = other.getFirstVisibleVerse();
+        if (top != null) syncMapped(other, source, top);
+    }
+
+    @Override
+    public void onUserScrollIdle(ReaderPanel source) {
+        if (!splitMode) return;
+        int[] top = source.getFirstVisibleVerse();
+        if (top != null) syncMapped(source, other(source), top);
+    }
+
+    // --- Page turns in split mode: both panels start the new page at the same verse ---
+
+    private static int cmp(int[] a, int[] b) {
+        return Integer.compare(ReaderPanel.verseKey(a), ReaderPanel.verseKey(b));
+    }
+
+    private int[] inPanel1Numbering(int[] ref2) {
+        return ref2 == null ? null : VerseMapper.map(panel2.db(), panel1.db(), ref2);
+    }
+
+    /** True when panel2's top verse lies on panel1's current page, i.e. the panels are in step. */
+    private boolean panelsOverlap(int[] first1, int[] last1) {
+        int[] top2 = inPanel1Numbering(panel2.getFirstVisibleVerse());
+        return top2 != null && cmp(top2, first1) >= 0 && cmp(top2, last1) <= 0;
+    }
+
+    private void splitPageDown() {
+        int[] first1 = panel1.getFirstVisibleVerse();
+        int[] last1 = panel1.getLastFullyVisibleVerse();
+        if (first1 == null || last1 == null) {
+            // A single verse taller than the panel: fall back to pixel paging
+            panel1.pageDown();
+            alignAfterLayout();
+            return;
+        }
+        int[] stop = last1;
+        if (panelsOverlap(first1, last1)) {
+            // The translation with the longer text sets the pace, so nothing is skipped in either panel
+            int[] last2 = inPanel1Numbering(panel2.getLastFullyVisibleVerse());
+            if (last2 != null && cmp(last2, first1) >= 0 && cmp(last2, stop) < 0) stop = last2;
+        }
+        int[] next = panel1.verseAfter(stop);
+        if (next == null) return;
+        EinkHelper.setPageTurnMode();
+        panel1.syncToVerse(next);
+        syncMapped(panel1, panel2, next);
+    }
+
+    private void splitPageUp() {
+        int[] first1 = panel1.getFirstVisibleVerse();
+        if (first1 == null) {
+            panel1.pageUp();
+            alignAfterLayout();
+            return;
+        }
+        // Go back one page of verses; the panel that fits fewer verses decides how many
+        int n = panel1.countFullyVisibleVerses();
+        int[] last1 = panel1.getLastFullyVisibleVerse();
+        if (last1 != null && panelsOverlap(first1, last1)) n = Math.min(n, panel2.countFullyVisibleVerses());
+        int[] top = panel1.verseBefore(first1, Math.max(1, n));
+        EinkHelper.setPageTurnMode();
+        panel1.syncToVerse(top);
+        syncMapped(panel1, panel2, top);
     }
 
     // --- Volume keys ---
@@ -192,12 +265,10 @@ public class ReaderActivity extends Activity implements ReaderPanel.OnScrollSync
         if (!isVerseVisible) return super.onKeyDown(keyCode, event);
 
         if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-            panel1.pageDown();
-            if (splitMode) syncPanel2ToPanel1();
+            if (splitMode) splitPageDown(); else panel1.pageDown();
             return true;
         } else if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
-            panel1.pageUp();
-            if (splitMode) syncPanel2ToPanel1();
+            if (splitMode) splitPageUp(); else panel1.pageUp();
             return true;
         }
         return super.onKeyDown(keyCode, event);
@@ -209,6 +280,66 @@ public class ReaderActivity extends Activity implements ReaderPanel.OnScrollSync
             if (panel1.isVerseListVisible()) return true;
         }
         return super.onKeyUp(keyCode, event);
+    }
+
+    // --- Bookmark: a single slot. Star with a selected verse saves it; star without a selection jumps to it ---
+
+    @Override
+    public void onBookmarkButton(ReaderPanel source) {
+        int[] sel = source.getSelectedVerse();
+        if (sel != null) {
+            bmBook = sel[0]; bmChapter = sel[1]; bmVerse = sel[2];
+            bmModule = source.currentModule;
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                    .putInt(PREF_BM_BOOK, bmBook)
+                    .putInt(PREF_BM_CHAPTER, bmChapter)
+                    .putInt(PREF_BM_VERSE, bmVerse)
+                    .putString(PREF_BM_MODULE, bmModule)
+                    .apply();
+            source.clearSelection();
+            applyBookmarkMarkers();
+        } else if (bmBook > 0) {
+            DatabaseHelper src = bookmarkSourceDb();
+            int[] ref = {bmBook, bmChapter, bmVerse};
+            int[] m1 = VerseMapper.map(src, panel1.db(), ref);
+            if (m1 != null) panel1.syncToVerse(m1);
+            if (splitMode) {
+                int[] m2 = VerseMapper.map(src, panel2.db(), ref);
+                if (m2 != null) panel2.syncToVerse(m2);
+            }
+        }
+    }
+
+    /** DatabaseHelper holding the module the bookmark was taken in, for numbering conversion. */
+    private DatabaseHelper bookmarkSourceDb() {
+        if (bmModule == null || bmModule.equals(panel1.currentModule)) return panel1.db();
+        if (panel2 != null && bmModule.equals(panel2.currentModule)) return panel2.db();
+        if (bmDb == null) bmDb = new DatabaseHelper(this);
+        if (!bmModule.equals(bmDb.getCurrentModule())) {
+            try {
+                bmDb.openModule(bmModule);
+            } catch (RuntimeException e) {
+                return panel1.db(); // module gone: use the numbers as they are
+            }
+        }
+        return bmDb;
+    }
+
+    /** Shows the star on the bookmarked verse in each panel, converted to that panel's numbering. */
+    private void applyBookmarkMarkers() {
+        if (bmBook <= 0) {
+            panel1.setBookmark(-1, 0, 0);
+            if (panel2 != null) panel2.setBookmark(-1, 0, 0);
+            return;
+        }
+        DatabaseHelper src = bookmarkSourceDb();
+        setMarker(panel1, src);
+        if (panel2 != null) setMarker(panel2, src);
+    }
+
+    private void setMarker(ReaderPanel panel, DatabaseHelper src) {
+        int[] m = VerseMapper.map(src, panel.db(), bmBook, bmChapter, bmVerse);
+        if (m == null) panel.setBookmark(-1, 0, 0); else panel.setBookmark(m[0], m[1], m[2]);
     }
 
     // --- Back ---
@@ -227,18 +358,14 @@ public class ReaderActivity extends Activity implements ReaderPanel.OnScrollSync
         super.onPause();
 
         // Save panel1 scroll position
-        ListView vl = (ListView) panel1.root.findViewById(R.id.verse_list);
-        int pos = vl.getFirstVisiblePosition();
-        int offset = 0;
-        View fc = vl.getChildAt(0);
-        if (fc != null) offset = fc.getTop() - vl.getPaddingTop();
+        int[] top = panel1.getTopPosition();
 
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
                 .putString(PREF_MODULE, panel1.currentModule)
                 .putInt(PREF_BOOK, panel1.currentBook)
                 .putInt(PREF_CHAPTER, panel1.currentChapter)
-                .putInt(PREF_SCROLL_POS, pos)
-                .putInt(PREF_SCROLL_OFFSET, offset)
+                .putInt(PREF_SCROLL_POS, top[0])
+                .putInt(PREF_SCROLL_OFFSET, top[1])
                 .putBoolean(PREF_SPLIT, splitMode)
                 .putString(PREF_MODULE2, panel2 != null ? panel2.currentModule : module2)
                 .apply();
@@ -249,5 +376,6 @@ public class ReaderActivity extends Activity implements ReaderPanel.OnScrollSync
         super.onDestroy();
         panel1.close();
         if (panel2 != null) panel2.close();
+        if (bmDb != null) bmDb.close();
     }
 }

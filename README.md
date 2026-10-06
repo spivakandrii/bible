@@ -12,6 +12,7 @@ Zero dependencies. Pure Android SDK. Instant launch.
 - **Book & chapter grid** — tap reference to pick book (6-col grid) then chapter (adaptive grid)
 - **Prev/Next navigation** — arrow buttons for quick chapter browsing (crosses book boundaries)
 - **Bookmark** — long-press a verse and tap ★ to save it; tap ★ with nothing selected to jump back (single slot, overwritten on save)
+- **Split screen in step** — two translations stacked; page turns start both panels at the same verse and the longer text sets the pace so nothing is skipped. Panels are matched by the real verse, not the printed number: Hebrew vs English chapter breaks (Joel 3/4, Nahum 1:15/2:1, Malachi 3/4 ...), Septuagint psalm numbering and numbered psalm titles are converted from the modules' own verse counts (`VerseMapper`)
 - **Infinite scroll** — lazy loading forward and backward, from Genesis to Revelation
 - **2800+ downloadable Bibles** in 900+ languages via MyBible module repository
 - **State persistence** — remembers module, book, chapter, and scroll position across launches
