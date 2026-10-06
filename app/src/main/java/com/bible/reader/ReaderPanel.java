@@ -123,14 +123,17 @@ public class ReaderPanel {
                         updateToolbar();
                     }
                 }
+                // Loading is posted, never done here: onScroll runs inside ListView.layoutChildren
+                // with layout requests blocked, so a notifyDataSetChanged at this point leaves the
+                // list flagged as changed with no layout pending, and it ignores touches until the
+                // next unrelated layout (long-press stopped working right after navigation).
                 if (!loading && totalCount > 0 && firstVisible + visibleCount >= totalCount - 10) {
-                    appendNextChapters(SCROLL_LOOKAHEAD);
+                    loading = true;
+                    verseList.post(appendRunnable);
                 }
                 if (!loading && firstVisible <= 5 && firstLoadedBook != -1) {
-                    View fc = view.getChildAt(0);
-                    int offset = (fc != null) ? fc.getTop() - view.getPaddingTop() : 0;
-                    int added = prependPreviousChapter();
-                    if (added > 0) verseList.setSelectionFromTop(firstVisible + added, offset);
+                    loading = true;
+                    verseList.post(prependRunnable);
                 }
             }
         });
@@ -270,20 +273,32 @@ public class ReaderPanel {
         return added;
     }
 
-    /** Scroll-triggered lazy load: several chapters, one adapter notification, one layout pass. */
-    private void appendNextChapters(int n) {
-        loading = true;
-        if (appendFollowingChapters(n) > 0) adapter.notifyDataSetChanged();
-        loading = false;
-    }
+    /** Scroll-triggered lazy load forward: several chapters, one adapter notification, one layout pass. */
+    private final Runnable appendRunnable = new Runnable() {
+        @Override public void run() {
+            if (appendFollowingChapters(SCROLL_LOOKAHEAD) > 0) adapter.notifyDataSetChanged();
+            loading = false;
+        }
+    };
+
+    /** Scroll-triggered lazy load backward; keeps the first visible row exactly where it is. */
+    private final Runnable prependRunnable = new Runnable() {
+        @Override public void run() {
+            int first = verseList.getFirstVisiblePosition();
+            View fc = verseList.getChildAt(0);
+            int offset = (fc != null) ? fc.getTop() - verseList.getPaddingTop() : 0;
+            int added = prependPreviousChapter();
+            if (added > 0) verseList.setSelectionFromTop(first + added, offset);
+            loading = false;
+        }
+    };
 
     private int prependPreviousChapter() {
         if (firstLoadedBook == -1) return 0;
-        loading = true;
         int prevBook = firstLoadedBook, prevChapter = firstLoadedChapter - 1;
         if (prevChapter < 1) {
             prevBook = db.getPrevBook(firstLoadedBook);
-            if (prevBook == -1) { loading = false; return 0; }
+            if (prevBook == -1) return 0;
             prevChapter = db.getChapterCount(prevBook);
         }
         String bookName = db.getBookName(prevBook);
@@ -294,7 +309,6 @@ public class ReaderPanel {
         items.addAll(0, newItems);
         firstLoadedBook = prevBook; firstLoadedChapter = prevChapter;
         adapter.notifyDataSetChanged();
-        loading = false;
         return newItems.size();
     }
 
